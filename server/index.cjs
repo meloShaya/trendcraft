@@ -5,7 +5,7 @@ const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const dotenv = require('dotenv');
-const { Apify } = require('apify');
+const Apify = require('apify');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 // Load environment variables
