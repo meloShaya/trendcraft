@@ -8,6 +8,16 @@ const dotenv = require('dotenv');
 const { ApifyClient } = require('apify-client');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
+// server/index.cjs
+
+const express = require('express');
+const cors = require('cors');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const dotenv = require('dotenv');
+const { Apify } = require('apify'); // <-- 1. CHANGED
+const { GoogleGenerativeAI } = require('@google/generative-ai');
+
 // Load environment variables
 dotenv.config();
 
@@ -15,8 +25,8 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || 'trendcraft-secret-key';
 
-// Initialize Apify Client
-const apifyClient = new ApifyClient({
+// Initialize Apify Client using the new SDK
+const apifyClient = Apify.newClient({ // <-- 2. CHANGED
   token: process.env.APIFY_API_TOKEN,
 });
 
@@ -26,10 +36,11 @@ const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
 
 // Middleware
 app.use(cors({
-  origin: 'http://localhost:5173', // Vite dev server
+  origin: 'http://localhost:5173',
   credentials: true
 }));
 app.use(express.json());
+
 
 // Root route for backend
 app.get('/', (req, res) => {
@@ -167,20 +178,30 @@ const fetchTrendsFromApify = async (platform = 'twitter') => {
 
     console.log(`Running actor: ${actorId} with input:`, input);
 
-    // Run the actor
+    // Run the actor - The method call is the same with the new client
     const run = await apifyClient.actor(actorId).call(input, {
-      timeout: 60000, // 60 seconds timeout
+      timeout: 60000,
       memory: 256
     });
 
     console.log(`Actor run completed. Run ID: ${run.id}`);
 
-    // Get the results
+    // Get the results - The method call is the same
     const { items } = await apifyClient.dataset(run.defaultDatasetId).listItems();
 
     console.log(`Retrieved ${items.length} items from Apify`);
-
-    // Transform the data to match our format
+    
+    // Your existing transformation logic is fine
+    const transformTrendData = (apifyData, platform = 'twitter') => {
+        if (!apifyData || !Array.isArray(apifyData)) return [];
+        return apifyData.map((item, index) => {
+            const keyword = item.trend || item.hashtag || item.topic || item.name || `Trend ${index + 1}`;
+            const volume = item.volume || item.posts || item.mentions || Math.floor(Math.random() * 100000) + 10000;
+            const growth = item.growth || item.change || `+${Math.floor(Math.random() * 50) + 5}%`;
+            return { id: index + 1, keyword: keyword.replace('#', ''), category: item.category || 'General', trendScore: item.score || Math.floor(Math.random() * 30) + 70, volume: typeof volume === 'number' ? volume : parseInt(volume) || Math.floor(Math.random() * 100000) + 10000, growth, platforms: [platform], relatedHashtags: item.hashtags || [`#${keyword.replace('#', '')}`, '#trending', '#viral'], peakTime: item.peakTime || '14:00-16:00 UTC', demographics: { age: item.demographics?.age || '25-34', interests: item.demographics?.interests || ['Technology', 'Social Media', 'Trends']}};
+        });
+    };
+    
     const transformedData = transformTrendData(items, platform);
 
     console.log(`Transformed ${transformedData.length} trends`);
@@ -188,36 +209,14 @@ const fetchTrendsFromApify = async (platform = 'twitter') => {
     return transformedData;
   } catch (error) {
     console.error('Error fetching trends from Apify:', error);
-
     // Return fallback mock data if Apify fails
     return [
-      {
-        id: 1,
-        keyword: 'AI Revolution',
-        category: 'Technology',
-        trendScore: 94,
-        volume: 125000,
-        growth: '+23%',
-        platforms: [platform],
-        relatedHashtags: ['#AI', '#ArtificialIntelligence', '#TechTrends', '#Innovation'],
-        peakTime: '14:00-16:00 UTC',
-        demographics: { age: '25-34', interests: ['Technology', 'Innovation', 'Startups'] }
-      },
-      {
-        id: 2,
-        keyword: 'Sustainable Tech',
-        category: 'Environment',
-        trendScore: 78,
-        volume: 87000,
-        growth: '+15%',
-        platforms: [platform],
-        relatedHashtags: ['#GreenTech', '#Sustainability', '#CleanEnergy'],
-        peakTime: '12:00-14:00 UTC',
-        demographics: { age: '28-45', interests: ['Environment', 'Technology', 'Sustainability'] }
-      }
+        {id: 1, keyword: 'AI Revolution', category: 'Technology', trendScore: 94, volume: 125000, growth: '+23%', platforms: [platform], relatedHashtags: ['#AI', '#ArtificialIntelligence', '#TechTrends', '#Innovation'], peakTime: '14:00-16:00 UTC', demographics: { age: '25-34', interests: ['Technology', 'Innovation', 'Startups'] }},
+        {id: 2, keyword: 'Sustainable Tech', category: 'Environment', trendScore: 78, volume: 87000, growth: '+15%', platforms: [platform], relatedHashtags: ['#GreenTech', '#Sustainability', '#CleanEnergy'], peakTime: '12:00-14:00 UTC', demographics: { age: '28-45', interests: ['Environment', 'Technology', 'Sustainability'] }}
     ];
   }
 };
+
 
 // Helper function to generate content with Gemini AI
 const generateContentWithAI = async (topic, platform, tone, targetAudience, includeHashtags) => {
@@ -679,4 +678,8 @@ app.listen(PORT, () => {
     console.log(`🎯 Frontend should run on: http://localhost:5173`);
     console.log(`🤖 Gemini AI: ${process.env.GEMINI_API_KEY ? 'Configured' : 'Not configured'}`);
     console.log(`🕷️ Apify: ${process.env.APIFY_API_TOKEN ? 'Configured' : 'Not configured'}`);
+});
+
+app.listen(PORT, () => {
+  console.log(`🚀 TrendCraft API server running on http://localhost:${PORT}`);
 });
