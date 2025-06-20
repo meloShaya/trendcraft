@@ -51,7 +51,7 @@ const ContentGenerator: React.FC = () => {
 
     setLoading(true);
     try {
-      const response = await fetch('http://localhost:3001/api/content/generate', {
+      const response = await fetch('/api/content/generate', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -88,7 +88,7 @@ const ContentGenerator: React.FC = () => {
     if (!generatedContent) return;
 
     try {
-      const response = await fetch('http://localhost:3001/api/posts', {
+      const response = await fetch('/api/posts', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

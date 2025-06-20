@@ -36,7 +36,7 @@ const Posts: React.FC = () => {
   useEffect(() => {
     const fetchPosts = async () => {
       try {
-        const response = await fetch('http://localhost:3001/api/posts', {
+        const response = await fetch('/api/posts', {
           headers: { Authorization: `Bearer ${token}` }
         });
         const data = await response.json();
@@ -57,7 +57,7 @@ const Posts: React.FC = () => {
     if (!confirm('Are you sure you want to delete this post?')) return;
 
     try {
-      const response = await fetch(`http://localhost:3001/api/posts/${postId}`, {
+      const response = await fetch(`/api/posts/${postId}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` }
       });

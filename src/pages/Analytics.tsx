@@ -29,10 +29,10 @@ const Analytics: React.FC = () => {
     const fetchAnalytics = async () => {
       try {
         const [performanceRes, overviewRes] = await Promise.all([
-          fetch('http://localhost:3001/api/analytics/performance', {
+          fetch('/api/analytics/performance', {
             headers: { Authorization: `Bearer ${token}` }
           }),
-          fetch('http://localhost:3001/api/analytics/overview', {
+          fetch('/api/analytics/overview', {
             headers: { Authorization: `Bearer ${token}` }
           })
         ]);

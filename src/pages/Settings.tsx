@@ -42,7 +42,7 @@ const Settings: React.FC = () => {
   const saveProfile = async () => {
     setSaving(true);
     try {
-      const response = await fetch('http://localhost:3001/api/user/profile', {
+      const response = await fetch('/api/user/profile', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',

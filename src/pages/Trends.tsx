@@ -28,7 +28,7 @@ const Trends: React.FC = () => {
   useEffect(() => {
     const fetchTrends = async () => {
       try {
-        const response = await fetch(`http://localhost:3001/api/trends?category=${selectedCategory}`, {
+        const response = await fetch(`/api/trends?category=${selectedCategory}`, {
           headers: { Authorization: `Bearer ${token}` }
         });
         const data = await response.json();
