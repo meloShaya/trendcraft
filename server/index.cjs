@@ -5,17 +5,7 @@ const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const dotenv = require('dotenv');
-const { ApifyClient } = require('apify-client');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
-
-// server/index.cjs
-
-const express = require('express');
-const cors = require('cors');
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
-const dotenv = require('dotenv');
-const { Apify } = require('apify'); // <-- 1. CHANGED
+const { Apify } = require('apify');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 // Load environment variables
@@ -26,7 +16,7 @@ const PORT = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || 'trendcraft-secret-key';
 
 // Initialize Apify Client using the new SDK
-const apifyClient = Apify.newClient({ // <-- 2. CHANGED
+const apifyClient = Apify.newClient({
   token: process.env.APIFY_API_TOKEN,
 });
 
@@ -40,7 +30,6 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json());
-
 
 // Root route for backend
 app.get('/', (req, res) => {
@@ -191,17 +180,7 @@ const fetchTrendsFromApify = async (platform = 'twitter') => {
 
     console.log(`Retrieved ${items.length} items from Apify`);
     
-    // Your existing transformation logic is fine
-    const transformTrendData = (apifyData, platform = 'twitter') => {
-        if (!apifyData || !Array.isArray(apifyData)) return [];
-        return apifyData.map((item, index) => {
-            const keyword = item.trend || item.hashtag || item.topic || item.name || `Trend ${index + 1}`;
-            const volume = item.volume || item.posts || item.mentions || Math.floor(Math.random() * 100000) + 10000;
-            const growth = item.growth || item.change || `+${Math.floor(Math.random() * 50) + 5}%`;
-            return { id: index + 1, keyword: keyword.replace('#', ''), category: item.category || 'General', trendScore: item.score || Math.floor(Math.random() * 30) + 70, volume: typeof volume === 'number' ? volume : parseInt(volume) || Math.floor(Math.random() * 100000) + 10000, growth, platforms: [platform], relatedHashtags: item.hashtags || [`#${keyword.replace('#', '')}`, '#trending', '#viral'], peakTime: item.peakTime || '14:00-16:00 UTC', demographics: { age: item.demographics?.age || '25-34', interests: item.demographics?.interests || ['Technology', 'Social Media', 'Trends']}};
-        });
-    };
-    
+    // Transform the data to match our format
     const transformedData = transformTrendData(items, platform);
 
     console.log(`Transformed ${transformedData.length} trends`);
@@ -216,7 +195,6 @@ const fetchTrendsFromApify = async (platform = 'twitter') => {
     ];
   }
 };
-
 
 // Helper function to generate content with Gemini AI
 const generateContentWithAI = async (topic, platform, tone, targetAudience, includeHashtags) => {
@@ -329,9 +307,6 @@ const generateContentWithAI = async (topic, platform, tone, targetAudience, incl
       };
     }
 };
-
-// ... (The rest of your functions: calculateViralScore, getBestPostTime, authenticateToken, etc., do not need to be changed)
-// Just copy them as they are below this comment.
 
 // Helper function to calculate viral score
 const calculateViralScore = (content, platform) => {
@@ -678,8 +653,4 @@ app.listen(PORT, () => {
     console.log(`🎯 Frontend should run on: http://localhost:5173`);
     console.log(`🤖 Gemini AI: ${process.env.GEMINI_API_KEY ? 'Configured' : 'Not configured'}`);
     console.log(`🕷️ Apify: ${process.env.APIFY_API_TOKEN ? 'Configured' : 'Not configured'}`);
-});
-
-app.listen(PORT, () => {
-  console.log(`🚀 TrendCraft API server running on http://localhost:${PORT}`);
 });
