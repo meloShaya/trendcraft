@@ -11,7 +11,16 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
-const JWT_SECRET = process.env.JWT_SECRET || "trendcraft-secret-key";
+// --- ROBUST JWT SECRET HANDLING ---
+const JWT_SECRET = process.env.JWT_SECRET;
+
+if (!JWT_SECRET) {
+    console.error("FATAL ERROR: JWT_SECRET is not defined in your .env file.");
+    console.error("The server cannot start without a secret key for signing tokens.");
+    process.exit(1); // Exit the process with a failure code
+}
+console.log("[OK] JWT_SECRET loaded successfully.");
+// --- END OF FIX ---
 
 // REMOVED: No more apifyClient initialization here
 
