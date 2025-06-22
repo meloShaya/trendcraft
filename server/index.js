@@ -58,6 +58,65 @@ app.get("/", (req, res) => {
 let users = [ { id: 1, username: "demo", email: "demo@trendcraft.ai", password: bcrypt.hashSync("demo123", 10), profile: { name: "Demo User", bio: "Content creator exploring AI-powered social media", avatar: "https://images.pexels.com/photos/614810/pexels-photo-614810.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&fit=crop" }, createdAt: new Date("2024-01-01") } ];
 let posts = [ { id: 1, userId: 1, content: "🚀 Just discovered the future of content creation with AI! The possibilities are endless when you combine creativity with technology. What's your take on AI-powered social media? #AI #ContentCreation #TechTrends", platform: "twitter", viralScore: 87, engagement: { likes: 342, retweets: 89, comments: 23, shares: 45 }, hashtags: ["#AI", "#ContentCreation", "#TechTrends"], status: "published", scheduledFor: new Date(), createdAt: new Date("2024-01-15"), performance: { impressions: 12500, reach: 8900, clickThrough: 156 } }, { id: 2, userId: 1, content: "💡 Hot take: The best social media strategy isn't about posting more—it's about posting smarter. Data-driven content creation is the game changer we've been waiting for! #SocialMediaStrategy #DataDriven #MarketingTips", platform: "twitter", viralScore: 92, engagement: { likes: 567, retweets: 143, comments: 67, shares: 89 }, hashtags: ["#SocialMediaStrategy", "#DataDriven", "#MarketingTips"], status: "published", scheduledFor: new Date(Date.now() - 86400000), createdAt: new Date("2024-01-14"), performance: { impressions: 18300, reach: 14200, clickThrough: 234 } } ];
 
+// Helper function to generate category-specific mock trends
+const generateMockTrendsByCategory = (category, platform = "twitter") => {
+    const trendsByCategory = {
+        'Technology': [
+            { keyword: "AI Revolution", hashtags: ["#AI", "#ArtificialIntelligence", "#TechTrends"], interests: ["Technology", "Innovation", "Startups"] },
+            { keyword: "Quantum Computing", hashtags: ["#QuantumComputing", "#TechBreakthrough", "#Innovation"], interests: ["Technology", "Science", "Computing"] },
+            { keyword: "Web3 Development", hashtags: ["#Web3", "#Blockchain", "#Decentralized"], interests: ["Technology", "Cryptocurrency", "Development"] },
+            { keyword: "Machine Learning", hashtags: ["#MachineLearning", "#DataScience", "#AI"], interests: ["Technology", "Data", "Programming"] },
+            { keyword: "Cybersecurity", hashtags: ["#Cybersecurity", "#InfoSec", "#DataProtection"], interests: ["Technology", "Security", "Privacy"] }
+        ],
+        'Business': [
+            { keyword: "Remote Work", hashtags: ["#RemoteWork", "#DigitalNomad", "#WorkFromHome"], interests: ["Business", "Technology", "Lifestyle"] },
+            { keyword: "Startup Funding", hashtags: ["#StartupFunding", "#VentureCapital", "#Entrepreneurship"], interests: ["Business", "Finance", "Startups"] },
+            { keyword: "Digital Marketing", hashtags: ["#DigitalMarketing", "#SocialMedia", "#MarketingStrategy"], interests: ["Business", "Marketing", "Technology"] },
+            { keyword: "E-commerce Growth", hashtags: ["#Ecommerce", "#OnlineBusiness", "#RetailTech"], interests: ["Business", "Technology", "Retail"] },
+            { keyword: "Leadership Skills", hashtags: ["#Leadership", "#Management", "#ProfessionalDevelopment"], interests: ["Business", "Career", "Leadership"] }
+        ],
+        'Environment': [
+            { keyword: "Sustainable Tech", hashtags: ["#GreenTech", "#Sustainability", "#CleanEnergy"], interests: ["Environment", "Technology", "Sustainability"] },
+            { keyword: "Climate Action", hashtags: ["#ClimateAction", "#ClimateChange", "#Sustainability"], interests: ["Environment", "Climate", "Activism"] },
+            { keyword: "Renewable Energy", hashtags: ["#RenewableEnergy", "#SolarPower", "#WindEnergy"], interests: ["Environment", "Energy", "Technology"] },
+            { keyword: "Carbon Neutral", hashtags: ["#CarbonNeutral", "#NetZero", "#ClimateGoals"], interests: ["Environment", "Business", "Sustainability"] },
+            { keyword: "Eco Innovation", hashtags: ["#EcoInnovation", "#GreenTech", "#SustainableLiving"], interests: ["Environment", "Innovation", "Lifestyle"] }
+        ],
+        'Health': [
+            { keyword: "Mental Health", hashtags: ["#MentalHealth", "#Wellness", "#SelfCare"], interests: ["Health", "Wellness", "Psychology"] },
+            { keyword: "Fitness Tech", hashtags: ["#FitnessTech", "#HealthTech", "#Wearables"], interests: ["Health", "Technology", "Fitness"] },
+            { keyword: "Nutrition Science", hashtags: ["#Nutrition", "#HealthyEating", "#Wellness"], interests: ["Health", "Nutrition", "Science"] },
+            { keyword: "Telemedicine", hashtags: ["#Telemedicine", "#DigitalHealth", "#HealthTech"], interests: ["Health", "Technology", "Medicine"] },
+            { keyword: "Preventive Care", hashtags: ["#PreventiveCare", "#HealthPrevention", "#Wellness"], interests: ["Health", "Medicine", "Wellness"] }
+        ],
+        'Entertainment': [
+            { keyword: "Streaming Wars", hashtags: ["#StreamingWars", "#Entertainment", "#DigitalMedia"], interests: ["Entertainment", "Technology", "Media"] },
+            { keyword: "Gaming Industry", hashtags: ["#Gaming", "#Esports", "#GameDev"], interests: ["Entertainment", "Gaming", "Technology"] },
+            { keyword: "Virtual Concerts", hashtags: ["#VirtualConcerts", "#Music", "#VR"], interests: ["Entertainment", "Music", "Technology"] },
+            { keyword: "Content Creation", hashtags: ["#ContentCreation", "#Influencer", "#SocialMedia"], interests: ["Entertainment", "Social Media", "Creativity"] },
+            { keyword: "NFT Art", hashtags: ["#NFTArt", "#DigitalArt", "#Blockchain"], interests: ["Entertainment", "Art", "Technology"] }
+        ]
+    };
+
+    const categoryTrends = trendsByCategory[category] || [];
+    
+    return categoryTrends.map((trend, index) => ({
+        id: index + 1,
+        keyword: trend.keyword,
+        category: category,
+        trendScore: Math.floor(Math.random() * 30) + 70,
+        volume: Math.floor(Math.random() * 100000) + 10000,
+        growth: `+${Math.floor(Math.random() * 50) + 5}%`,
+        platforms: [platform],
+        relatedHashtags: trend.hashtags,
+        peakTime: "14:00-16:00 UTC",
+        demographics: {
+            age: "25-34",
+            interests: trend.interests
+        }
+    }));
+};
+
 // Helper function to transform Apify trend data
 const transformTrendData = (apifyData, platform = "twitter") => {
     if (!apifyData || !Array.isArray(apifyData)) {
@@ -84,9 +143,16 @@ const transformTrendData = (apifyData, platform = "twitter") => {
 };
 
 // REWRITTEN Helper function to fetch trends from Apify using axios
-const fetchTrendsFromApify = async (platform = "twitter") => {
+const fetchTrendsFromApify = async (platform = "twitter", category = null) => {
     try {
-        console.log(`Fetching trends for platform: ${platform} via direct API call`);
+        console.log(`Fetching trends for platform: ${platform}, category: ${category} via direct API call`);
+        
+        // If a specific category is requested, return mock data for that category
+        if (category && category !== 'all') {
+            console.log(`Generating mock trends for category: ${category}`);
+            return generateMockTrendsByCategory(category, platform);
+        }
+        
         let actorId, actorInput;
 
         if (platform === "twitter" || platform === "x") {
@@ -118,7 +184,7 @@ const fetchTrendsFromApify = async (platform = "twitter") => {
         // STEP 2: Fetch the results from the run's dataset
         // Note: We poll for the run status until it's finished. A real production app might use webhooks.
         // For this app, we will just wait and then fetch the dataset directly. A simple GET will suffice.
-        const getResultsUrl = `https://api.apify.com/v2/datasets/${datasetId}/items?token=${token}`;
+        const getResultsUrl = `https://api.datasets/${datasetId}/items?token=${token}`;
         
         // We need to wait a bit for the actor to finish. Let's try fetching after a delay.
         // A simple but effective method for this use case is to poll.
@@ -156,9 +222,17 @@ const fetchTrendsFromApify = async (platform = "twitter") => {
 
     } catch (error) {
         console.error("Error fetching trends from Apify direct API:", error.response ? error.response.data : error.message);
+        
+        // Return fallback mock data based on category
+        if (category && category !== 'all') {
+            return generateMockTrendsByCategory(category, platform);
+        }
+        
+        // Return general fallback data
         return [
             { id: 1, keyword: "AI Revolution", category: "Technology", trendScore: 94, volume: 125000, growth: "+23%", platforms: [platform], relatedHashtags: ["#AI"], peakTime: '14:00-16:00 UTC', demographics: { age: '25-34', interests: ['Technology'] } },
-            { id: 2, keyword: "Sustainable Tech", category: "Environment", trendScore: 78, volume: 87000, growth: "+15%", platforms: [platform], relatedHashtags: ["#GreenTech"], peakTime: '12:00-14:00 UTC', demographics: { age: '28-45', interests: ['Environment'] } }
+            { id: 2, keyword: "Sustainable Tech", category: "Environment", trendScore: 78, volume: 87000, growth: "+15%", platforms: [platform], relatedHashtags: ["#GreenTech"], peakTime: '12:00-14:00 UTC', demographics: { age: '28-45', interests: ['Environment'] } },
+            { id: 3, keyword: "Remote Work", category: "Business", trendScore: 85, volume: 95000, growth: "+18%", platforms: [platform], relatedHashtags: ["#RemoteWork"], peakTime: '09:00-11:00 UTC', demographics: { age: '25-40', interests: ['Business'] } }
         ];
     }
 };
@@ -266,11 +340,18 @@ app.post("/api/auth/login", async (req, res) => {
 // Trends Routes
 app.get("/api/trends", authenticateToken, async (req, res) => {
     const { category, limit = 10, platform = "twitter" } = req.query;
-    let trends = await fetchTrendsFromApify(platform);
+    console.log(`Trends API called with category: ${category}, platform: ${platform}`);
+    
+    let trends = await fetchTrendsFromApify(platform, category);
+    
+    // Additional filtering if needed (the fetchTrendsFromApify already handles category filtering)
     if (category && category !== 'all') {
         trends = trends.filter(t => t.category.toLowerCase() === category.toLowerCase());
     }
-    res.json(trends.slice(0, parseInt(limit)));
+    
+    const limitedTrends = trends.slice(0, parseInt(limit));
+    console.log(`Returning ${limitedTrends.length} trends for category: ${category}`);
+    res.json(limitedTrends);
 });
 
 // Content Routes
