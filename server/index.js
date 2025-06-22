@@ -111,12 +111,12 @@ const PLATFORM_ACTORS = {
     },
     tiktok: {
         actorId: 'novi/fast-tiktok-api',
-        input: {
-            scrapingType: "TREND", // Use TREND scraping type
-            targetCountry: "United Kingdom",
-            keyword: "viral", // For search-based trending
-            limitResult: 20
-        }
+        // input: {
+        //     scrapingType: "TREND", // Use TREND scraping type
+        //     targetCountry: "United Kingdom",
+        //     keyword: "viral", // For search-based trending
+        //     limitResult: 20
+        // }
     },
     facebook: {
         actorId: 'apify/facebook-posts-scraper', // Placeholder
@@ -151,10 +151,10 @@ const transformTrendData = (apifyData, platform = "twitter") => {
                 if (item.trend || item.name || item.query) {
                     const keyword = item.trend || item.name || item.query;
                     // Skip if it's generic like "Trend 1", "Trend 2" etc.
-                    if (keyword.match(/^Trend \d+$/i)) {
-                        console.log(`Skipping generic trend: ${keyword}`);
-                        continue;
-                    }
+                    // if (keyword.match(/^Trend \d+$/i)) {
+                    //     console.log(`Skipping generic trend: ${keyword}`);
+                    //     continue;
+                    // }
                     
                     trendData = {
                         keyword: cleanKeyword(keyword),
