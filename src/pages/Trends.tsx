@@ -25,12 +25,13 @@ const Trends: React.FC = () => {
   const [trends, setTrends] = useState<Trend[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('all');
+  const [selectedPlatform, setSelectedPlatform] = useState('twitter');
 
   useEffect(() => {
     const fetchTrends = async () => {
       try {
-        const response = await fetch(`/api/trends?category=${selectedCategory}`, {
+        setLoading(true);
+        const response = await fetch(`/api/trends?platform=${selectedPlatform}&limit=20`, {
           headers: { Authorization: `Bearer ${token}` }
         });
         
@@ -66,14 +67,20 @@ const Trends: React.FC = () => {
     if (token) {
       fetchTrends();
     }
-  }, [token, selectedCategory, logout]);
+  }, [token, selectedPlatform, logout]);
 
   const filteredTrends = trends.filter(trend =>
     trend.keyword.toLowerCase().includes(searchTerm.toLowerCase()) ||
     trend.category.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const categories = ['all', 'Technology', 'Business', 'Environment', 'Health', 'Entertainment'];
+  const platforms = [
+    { id: 'twitter', name: 'X (Twitter)', icon: '𝕏' },
+    { id: 'instagram', name: 'Instagram', icon: '📷' },
+    { id: 'tiktok', name: 'TikTok', icon: '🎵' },
+    { id: 'facebook', name: 'Facebook', icon: 'f' },
+    { id: 'youtube', name: 'YouTube', icon: '▶️' }
+  ];
 
   const getTrendColor = (score: number) => {
     if (score >= 90) return 'text-red-600 bg-red-100 dark:bg-red-900/20 dark:text-red-400';
@@ -113,11 +120,11 @@ const Trends: React.FC = () => {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white">Trending Topics</h1>
-          <p className="text-gray-600 dark:text-gray-400 text-sm sm:text-base">Discover what's trending across social media</p>
+          <p className="text-gray-600 dark:text-gray-400 text-sm sm:text-base">Discover what's trending across social media platforms</p>
         </div>
       </div>
 
-      {/* Search and Filters */}
+      {/* Search and Platform Filter */}
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-4 sm:p-6">
         <div className="flex flex-col sm:flex-row gap-4">
           <div className="relative flex-1">
@@ -134,16 +141,29 @@ const Trends: React.FC = () => {
           <div className="flex items-center space-x-2">
             <Filter className="h-4 w-4 sm:h-5 sm:w-5 text-gray-400" />
             <select
-              value={selectedCategory}
-              onChange={(e) => setSelectedCategory(e.target.value)}
-              className="px-3 sm:px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-white text-sm sm:text-base"
+              value={selectedPlatform}
+              onChange={(e) => setSelectedPlatform(e.target.value)}
+              className="px-3 sm:px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-white text-sm sm:text-base min-w-[140px]"
             >
-              {categories.map(category => (
-                <option key={category} value={category}>
-                  {category === 'all' ? 'All Categories' : category}
+              {platforms.map(platform => (
+                <option key={platform.id} value={platform.id}>
+                  {platform.icon} {platform.name}
                 </option>
               ))}
             </select>
+          </div>
+        </div>
+
+        {/* Platform Status Indicator */}
+        <div className="mt-4 flex items-center justify-between">
+          <div className="flex items-center space-x-2">
+            <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+            <span className="text-sm text-gray-600 dark:text-gray-400">
+              Live trends from {platforms.find(p => p.id === selectedPlatform)?.name}
+            </span>
+          </div>
+          <div className="text-sm text-gray-500 dark:text-gray-400">
+            {trends.length} trends found
           </div>
         </div>
       </div>
@@ -175,7 +195,7 @@ const Trends: React.FC = () => {
                 <div className="min-w-0">
                   <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Volume</p>
                   <p className="font-medium text-gray-900 dark:text-white text-sm sm:text-base">
-                    {trend.volume.toLocaleString()}
+                    {typeof trend.volume === 'number' ? trend.volume.toLocaleString() : trend.volume}
                   </p>
                 </div>
               </div>
@@ -190,18 +210,22 @@ const Trends: React.FC = () => {
               </div>
             </div>
 
-            {/* Platforms */}
+            {/* Platform Badge */}
             <div className="mb-4">
-              <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400 mb-2">Popular on:</p>
+              <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400 mb-2">Platform:</p>
               <div className="flex flex-wrap gap-1 sm:gap-2">
-                {trend.platforms.map(platform => (
-                  <span
-                    key={platform}
-                    className="px-2 py-1 bg-blue-100 dark:bg-blue-900/20 text-blue-800 dark:text-blue-200 text-xs rounded-md capitalize"
-                  >
-                    {platform}
-                  </span>
-                ))}
+                {trend.platforms.map(platform => {
+                  const platformInfo = platforms.find(p => p.id === platform);
+                  return (
+                    <span
+                      key={platform}
+                      className="px-2 py-1 bg-blue-100 dark:bg-blue-900/20 text-blue-800 dark:text-blue-200 text-xs rounded-md capitalize flex items-center space-x-1"
+                    >
+                      <span>{platformInfo?.icon || '📱'}</span>
+                      <span>{platformInfo?.name || platform}</span>
+                    </span>
+                  );
+                })}
               </div>
             </div>
 
@@ -209,9 +233,9 @@ const Trends: React.FC = () => {
             <div className="mb-4">
               <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400 mb-2">Related hashtags:</p>
               <div className="flex flex-wrap gap-1">
-                {trend.relatedHashtags.slice(0, 4).map(hashtag => (
+                {trend.relatedHashtags.slice(0, 4).map((hashtag, index) => (
                   <span
-                    key={hashtag}
+                    key={index}
                     className="inline-flex items-center px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 text-xs rounded"
                   >
                     <Hash className="h-3 w-3 mr-1" />
@@ -221,7 +245,7 @@ const Trends: React.FC = () => {
               </div>
             </div>
 
-            {/* Demographics */}
+            {/* Demographics and Action */}
             <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
               <div className="flex items-center justify-between text-sm">
                 <div className="flex items-center text-gray-600 dark:text-gray-400">
@@ -247,7 +271,7 @@ const Trends: React.FC = () => {
             No trends found
           </h3>
           <p className="text-sm sm:text-base text-gray-500 dark:text-gray-400">
-            Try adjusting your search or filter criteria.
+            {searchTerm ? 'Try adjusting your search criteria.' : `No trends available for ${platforms.find(p => p.id === selectedPlatform)?.name} at the moment.`}
           </p>
         </div>
       )}
