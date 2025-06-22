@@ -96,9 +96,15 @@ const fetchTrendsFromApify = async (platform = "twitter") => {
             actorId = process.env.SOCIAL_INSIGHT_ACTOR_ID;
             actorInput = { platform: platform, maxResults: 20, sortBy: "trending" };
         }
-        
-        const url = `https://api.apify.com/v2/acts/${actorId}/runs/sync-get-dataset-items?token=${process.env.APIFY_API_TOKEN}`;
-        console.log(`Calling Apify API: POST ${url.split('?')[0]}...`); // Log URL without token
+
+        // --- THIS IS THE FIX ---
+        // Replace '/' with '~' in the actorId to make it URL-safe for the Apify API
+        const safeActorId = actorId.replace('/', '~');
+        // --- END OF FIX ---
+      
+        const url = `https://api.apify.com/v2/acts/${safeActorId}/runs/sync-get-dataset-items?token=${process.env.APIFY_API_TOKEN}`;
+        console.log(`Calling Apify API: POST https://api.apify.com/v2/acts/${safeActorId}/runs/sync-get-dataset-items...`);
+
 
         const response = await axios.post(url, actorInput, {
             headers: { 'Content-Type': 'application/json' }
