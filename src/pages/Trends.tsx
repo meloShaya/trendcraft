@@ -19,7 +19,7 @@ interface Trend {
 }
 
 const Trends: React.FC = () => {
-  const { token } = useAuth();
+  const { token, logout } = useAuth();
   const [trends, setTrends] = useState<Trend[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -31,6 +31,12 @@ const Trends: React.FC = () => {
         const response = await fetch(`/api/trends?category=${selectedCategory}`, {
           headers: { Authorization: `Bearer ${token}` }
         });
+        
+        if (response.status === 401 || response.status === 403) {
+          // Authentication failed - logout user and redirect to login
+          logout();
+          return;
+        }
         
         if (!response.ok) {
           console.error('Failed to fetch trends:', response.status, response.statusText);
@@ -58,7 +64,7 @@ const Trends: React.FC = () => {
     if (token) {
       fetchTrends();
     }
-  }, [token, selectedCategory]);
+  }, [token, selectedCategory, logout]);
 
   const filteredTrends = trends.filter(trend =>
     trend.keyword.toLowerCase().includes(searchTerm.toLowerCase()) ||
