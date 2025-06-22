@@ -99,15 +99,15 @@ let posts = [
 const PLATFORM_ACTORS = {
     twitter: {
         actorId: process.env.TWITTER_TRENDS_ACTOR_ID || 'apify/twitter-trends-scraper',
-        input: { location: "United States", maxTrends: 20 }
+        input: { location: "United States", maxTrends: 10 }
     },
     instagram: {
         actorId: 'easyapi/instagram-posts-scraper',
-        input: { hashtag: "trending", maxResults: 20, sortBy: "recent" }
+        input: { hashtag: "trending", maxResults: 10, sortBy: "recent" }
     },
     tiktok: {
         actorId: 'novi/fast-tiktok-api',
-        input: { hashtag: "trending", maxResults: 20, sortBy: "popular" }
+        input: { hashtag: "trending", maxResults: 10, sortBy: "popular" }
     },
     facebook: {
         actorId: 'apify/facebook-posts-scraper', // Placeholder
