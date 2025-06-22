@@ -40,8 +40,8 @@ console.log('[OK] Google AI SDK Initialized.'); // Moved this up, since it seems
 // STEP 3: Try to initialize Apify inside a robust try...catch block
 try {
     console.log('[ATTEMPTING] Apify SDK Initialization...');
-    const Apify = require('apify');
-    const apifyClient = Apify.newClient({ token: apifyToken });
+    const { ApifyClient } = require('apify-client');
+    const apifyClient = new ApifyClient({token: process.env.APIFY_API_TOKEN,});
     console.log('[OK] Apify SDK Initialized successfully.');
 } catch (e) {
     console.error('❌❌ CAUGHT A SYNCHRONOUS ERROR DURING INITIALIZATION ❌❌');
