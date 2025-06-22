@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Sparkles, Copy, Send, RotateCcw, Zap, Target, Clock, TrendingUp, Settings, Eye, Hash, MessageSquare } from 'lucide-react';
+import { Sparkles, Copy, Send, RotateCcw, Zap, Target, Clock, TrendingUp, Settings, Eye, Hash, MessageSquare, Edit, Save, X } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import PlatformPreview from '../components/PlatformPreview';
 import PlatformConnections from '../components/PlatformConnections';
@@ -60,6 +60,8 @@ const ContentGenerator: React.FC = () => {
   const [isPublishing, setIsPublishing] = useState(false);
   const [trendNotification, setTrendNotification] = useState<string | null>(null);
   const [showOptimization, setShowOptimization] = useState(false);
+  const [isEditingContent, setIsEditingContent] = useState(false);
+  const [editedContent, setEditedContent] = useState('');
 
   // Check for trend data from sessionStorage on component mount
   useEffect(() => {
@@ -120,6 +122,8 @@ const ContentGenerator: React.FC = () => {
         setGeneratedContent(content);
         setActiveTab('preview');
         setShowOptimization(true);
+        setIsEditingContent(false);
+        setEditedContent('');
       }
     } catch (error) {
       console.error('Error generating content:', error);
@@ -165,6 +169,61 @@ const ContentGenerator: React.FC = () => {
     } catch (error) {
       console.error('Error saving post:', error);
     }
+  };
+
+  const handleEditContent = () => {
+    if (generatedContent) {
+      setEditedContent(generatedContent.content);
+      setIsEditingContent(true);
+    }
+  };
+
+  const handleSaveEdit = () => {
+    if (generatedContent && editedContent.trim()) {
+      setGeneratedContent(prev => prev ? {
+        ...prev,
+        content: editedContent.trim()
+      } : null);
+      setIsEditingContent(false);
+      setEditedContent('');
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setIsEditingContent(false);
+    setEditedContent('');
+  };
+
+  const handleRegenerateContent = () => {
+    setActiveTab('generate');
+    setIsEditingContent(false);
+    setEditedContent('');
+  };
+
+  const handleHashtagSuggestion = async (hashtags: string[]) => {
+    if (!generatedContent) return;
+    
+    // Add suggested hashtags to content
+    const hashtagString = hashtags.join(' ');
+    const updatedContent = `${generatedContent.content} ${hashtagString}`;
+    
+    setGeneratedContent(prev => prev ? {
+      ...prev,
+      content: updatedContent,
+      hashtags: [...prev.hashtags, ...hashtags]
+    } : null);
+  };
+
+  const handleCTASuggestion = async (cta: string) => {
+    if (!generatedContent) return;
+    
+    // Add CTA to content
+    const updatedContent = `${generatedContent.content} ${cta}`;
+    
+    setGeneratedContent(prev => prev ? {
+      ...prev,
+      content: updatedContent
+    } : null);
   };
 
   const handlePlatformConnect = (platformId: string) => {
@@ -224,32 +283,6 @@ const ContentGenerator: React.FC = () => {
   const handleTogglePausePost = (postId: string) => {
     console.log('Toggle pause post:', postId);
     // In real implementation, pause/resume scheduled post
-  };
-
-  const handleHashtagSuggestion = async (hashtags: string[]) => {
-    if (!generatedContent) return;
-    
-    // Add suggested hashtags to content
-    const hashtagString = hashtags.join(' ');
-    const updatedContent = `${generatedContent.content} ${hashtagString}`;
-    
-    setGeneratedContent(prev => prev ? {
-      ...prev,
-      content: updatedContent,
-      hashtags: [...prev.hashtags, ...hashtags]
-    } : null);
-  };
-
-  const handleCTASuggestion = async (cta: string) => {
-    if (!generatedContent) return;
-    
-    // Add CTA to content
-    const updatedContent = `${generatedContent.content} ${cta}`;
-    
-    setGeneratedContent(prev => prev ? {
-      ...prev,
-      content: updatedContent
-    } : null);
   };
 
   const tabs = [
@@ -505,6 +538,73 @@ const ContentGenerator: React.FC = () => {
           {activeTab === 'preview' && generatedContent && (
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 sm:gap-8">
               <div className="xl:col-span-2">
+                {/* Editable Content Section */}
+                <div className="mb-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Content</h3>
+                    <div className="flex items-center space-x-2">
+                      {!isEditingContent ? (
+                        <>
+                          <button
+                            onClick={handleEditContent}
+                            className="flex items-center px-3 py-2 text-sm bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                          >
+                            <Edit className="h-4 w-4 mr-2" />
+                            Edit Content
+                          </button>
+                          <button
+                            onClick={handleRegenerateContent}
+                            className="flex items-center px-3 py-2 text-sm bg-blue-100 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-900/30 transition-colors"
+                          >
+                            <RotateCcw className="h-4 w-4 mr-2" />
+                            Regenerate Content
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            onClick={handleSaveEdit}
+                            className="flex items-center px-3 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                          >
+                            <Save className="h-4 w-4 mr-2" />
+                            Save
+                          </button>
+                          <button
+                            onClick={handleCancelEdit}
+                            className="flex items-center px-3 py-2 text-sm bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                          >
+                            <X className="h-4 w-4 mr-2" />
+                            Cancel
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  {isEditingContent ? (
+                    <div className="space-y-3">
+                      <textarea
+                        value={editedContent}
+                        onChange={(e) => setEditedContent(e.target.value)}
+                        rows={6}
+                        className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-white resize-none text-sm leading-relaxed"
+                        placeholder="Edit your content here..."
+                      />
+                      <div className="flex items-center justify-between text-sm text-gray-500 dark:text-gray-400">
+                        <span>Characters: {editedContent.length}</span>
+                        <span>Platform: {generatedContent.platform}</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4">
+                      <p className="text-gray-900 dark:text-white whitespace-pre-wrap leading-relaxed">
+                        {generatedContent.content}
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Platform Preview */}
                 <PlatformPreview
                   platform={generatedContent.platform}
                   content={generatedContent.content}
@@ -518,12 +618,6 @@ const ContentGenerator: React.FC = () => {
                 />
                 
                 <div className="flex flex-col sm:flex-row justify-center space-y-3 sm:space-y-0 sm:space-x-4 mt-6">
-                  <button
-                    onClick={() => setActiveTab('generate')}
-                    className="px-4 sm:px-6 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-sm sm:text-base"
-                  >
-                    Edit Content
-                  </button>
                   <button
                     onClick={() => setActiveTab('publish')}
                     className="px-4 sm:px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm sm:text-base"
