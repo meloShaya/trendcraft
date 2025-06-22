@@ -151,7 +151,6 @@ const fetchTrendsFromApify = async (platform = "twitter") => {
         }
         // --- END OF FIX ---
       
-        const items = response.data;
         console.log(`Retrieved ${items.length} items from Apify`);
         return transformTrendData(items, platform);
 
