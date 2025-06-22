@@ -40,7 +40,7 @@ const PLATFORM_ACTORS = {
         actorId: 'easyapi/instagram-posts-scraper',
         input: {
             usernames: ["trending", "viral", "popular"],
-            maxPosts: 20,
+            maxPosts: 10,
             skipPinnedPosts: true
         }
     },
@@ -50,7 +50,7 @@ const PLATFORM_ACTORS = {
         input: {
             type: "TREND", // Changed from scrapingType
             country: "US",    // Changed from targetCountry, used standard country code
-            limit: 20         // Changed from limitResult
+            limit: 10         // Changed from limitResult
         }
     },
     facebook: {
