@@ -612,8 +612,6 @@ app.use('*', (req, res) => {
   });
 });
 
-// Start server with proper error handling
-
 
 // The final app.listen call
 app.listen(PORT, () => {
