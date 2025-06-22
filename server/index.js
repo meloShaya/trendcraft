@@ -111,12 +111,12 @@ const PLATFORM_ACTORS = {
     },
     tiktok: {
         actorId: 'novi/fast-tiktok-api',
-        // input: {
-        //     scrapingType: "TREND", // Use TREND scraping type
-        //     targetCountry: "United Kingdom",
-        //     keyword: "viral", // For search-based trending
-        //     limitResult: 10
-        // }
+        input: {
+            scrapingType: "TREND", // Use TREND scraping type
+            targetCountry: "United Kingdom",
+            keyword: "viral", // For search-based trending
+            limitResult: 10
+        }
     },
     facebook: {
         actorId: 'apify/facebook-posts-scraper', // Placeholder
@@ -158,12 +158,12 @@ const transformTrendData = (apifyData, platform = "twitter") => {
                     
                     trendData = {
                         keyword: cleanKeyword(keyword),
-                        category: item.category || null, // Only use if exists, no fallback
+                        category: item.category || 'General', // Default to 'General' instead of null
                         volume: item.tweet_volume || item.volume || 0,
                         growth: item.growth || calculateGrowthFromVolume(item.tweet_volume || item.volume || 0),
                         hashtags: item.hashtags || extractHashtagsFromText(keyword),
                         peakTime: item.peak_time || null, // No fallback
-                        demographics: item.demographics || null // No fallback
+                        demographics: item.demographics || { age: 'N/A', interests: [] } // Default demographics object
                     };
                 }
                 break;
@@ -177,12 +177,12 @@ const transformTrendData = (apifyData, platform = "twitter") => {
                     if (keyword) {
                         trendData = {
                             keyword: cleanKeyword(keyword),
-                            category: null, // Instagram doesn't provide categories
-                            volume: item.likesCount || item.likes_count || item.likes || 0,
-                            growth: calculateGrowthFromEngagement(item.likesCount, item.commentsCount),
+                            category: 'General', // Default category instead of null
+                            volume: item.likeCount || item.likes_count || item.likes || 0,
+                            growth: calculateGrowthFromEngagement(item.likeCount, item.commentsCount),
                             hashtags: item.hashtags || extractHashtagsFromText(item.caption),
                             peakTime: null, // No real peak time data from Instagram API
-                            demographics: null // No demographics from Instagram API
+                            demographics: { age: 'N/A', interests: [] } // Default demographics object
                         };
                     }
                 }
@@ -196,12 +196,12 @@ const transformTrendData = (apifyData, platform = "twitter") => {
                     if (keyword) {
                         trendData = {
                             keyword: cleanKeyword(keyword),
-                            category: null, // TikTok doesn't provide categories
+                            category: 'General', // Default category instead of null
                             volume: item.playCount || item.play_count || item.diggCount || item.digg_count || 0,
                             growth: calculateGrowthFromViews(item.playCount || item.play_count || 0),
                             hashtags: item.hashtags || extractHashtagsFromText(item.desc || item.description),
                             peakTime: null, // No real peak time data
-                            demographics: null // No demographics data
+                            demographics: { age: 'N/A', interests: [] } // Default demographics object
                         };
                     }
                 }
@@ -214,12 +214,12 @@ const transformTrendData = (apifyData, platform = "twitter") => {
                     if (keyword) {
                         trendData = {
                             keyword: cleanKeyword(keyword),
-                            category: null,
+                            category: 'General', // Default category instead of null
                             volume: (item.reactions || 0) + (item.shares || 0) + (item.comments || 0),
                             growth: calculateGrowthFromEngagement(item.reactions, item.comments),
                             hashtags: extractHashtagsFromText(item.text || item.message),
                             peakTime: null,
-                            demographics: null
+                            demographics: { age: 'N/A', interests: [] } // Default demographics object
                         };
                     }
                 }
@@ -232,12 +232,12 @@ const transformTrendData = (apifyData, platform = "twitter") => {
                     if (keyword) {
                         trendData = {
                             keyword: cleanKeyword(keyword),
-                            category: null,
+                            category: 'General', // Default category instead of null
                             volume: item.viewCount || item.view_count || 0,
                             growth: calculateGrowthFromViews(item.viewCount || item.view_count || 0),
                             hashtags: item.tags || extractHashtagsFromText(item.title),
                             peakTime: null,
-                            demographics: null
+                            demographics: { age: 'N/A', interests: [] } // Default demographics object
                         };
                     }
                 }
@@ -251,14 +251,14 @@ const transformTrendData = (apifyData, platform = "twitter") => {
             transformedTrends.push({
                 id: transformedTrends.length + 1,
                 keyword: trendData.keyword,
-                category: trendData.category, // Can be null
+                category: trendData.category, // Now always has a value
                 trendScore,
                 volume: trendData.volume,
                 growth: trendData.growth,
                 platforms: [platform],
                 relatedHashtags: trendData.hashtags.slice(0, 5),
                 peakTime: trendData.peakTime, // Can be null
-                demographics: trendData.demographics // Can be null
+                demographics: trendData.demographics // Now always has a valid object
             });
         }
     }
