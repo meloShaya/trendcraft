@@ -101,6 +101,21 @@ const fetchTrendsFromApify = async (platform = "twitter") => {
         // Replace '/' with '~' in the actorId to make it URL-safe for the Apify API
         const safeActorId = actorId.replace('/', '~');
         // --- END OF FIX ---
+
+        // --- THIS IS THE FIX ---
+        // 1. Convert the actor input object to a URL-safe string.
+        const inputJson = JSON.stringify(actorInput);
+        const encodedInput = encodeURIComponent(inputJson);
+
+        // 2. Construct the URL for a GET request with query parameters.
+        const url = `https://api.apify.com/v2/acts/${safeActorId}/runs/sync-get-dataset-items?oken=${process.env.APIFY_API_TOKEN}&input=${encodedInput}`;
+        console.log(`Calling Apify API: GET https://api.apify.com/v2/acts/${safeActorId}/runs/sync-get-dataset-items...`);
+
+        // 3. Use axios.get() instead of axios.post()
+        const response = await axios.get(url, {
+            headers: { 'Content-Type': 'application/json' }
+        });
+        // --- END OF FIX ---
       
         const url = `https://api.apify.com/v2/acts/${safeActorId}/runs/sync-get-dataset-items?token=${process.env.APIFY_API_TOKEN}`;
         console.log(`Calling Apify API: POST https://api.apify.com/v2/acts/${safeActorId}/runs/sync-get-dataset-items...`);
