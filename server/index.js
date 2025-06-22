@@ -95,19 +95,28 @@ let posts = [
     } 
 ];
 
-// Platform-specific actor configurations
+// Platform-specific actor configurations with correct input structures
 const PLATFORM_ACTORS = {
     twitter: {
         actorId: process.env.TWITTER_TRENDS_ACTOR_ID || 'apify/twitter-trends-scraper',
-        input: { location: "United States", maxTrends: 10 }
+        input: { location: "United States", maxTrends: 20 }
     },
     instagram: {
         actorId: 'easyapi/instagram-posts-scraper',
-        input: { hashtag: "trending", maxResults: 10, sortBy: "recent" }
+        input: {
+            usernames: ["trending", "viral", "popular"], // Instagram usernames to scrape
+            maxPosts: 20,
+            skipPinnedPosts: true
+        }
     },
     tiktok: {
         actorId: 'novi/fast-tiktok-api',
-        input: { hashtag: "trending", maxResults: 10, sortBy: "popular" }
+        input: {
+            scrapingType: "TREND", // Use TREND scraping type
+            targetCountry: "United Kingdom",
+            keyword: "viral", // For search-based trending
+            limitResult: 20
+        }
     },
     facebook: {
         actorId: 'apify/facebook-posts-scraper', // Placeholder
@@ -119,37 +128,40 @@ const PLATFORM_ACTORS = {
     }
 };
 
-// Enhanced helper function to transform platform-specific data
+// Enhanced helper function to transform platform-specific data from real APIs
 const transformTrendData = (apifyData, platform = "twitter") => {
     if (!apifyData || !Array.isArray(apifyData)) {
         console.log("Invalid Apify data received:", apifyData);
         return [];
     }
 
+    console.log(`Transforming ${apifyData.length} items for platform: ${platform}`);
+
     return apifyData.map((item, index) => {
         let keyword, volume, growth, category, hashtags, peakTime, demographics;
 
-        // Platform-specific data extraction
+        // Platform-specific data extraction from REAL API responses
         switch (platform) {
             case 'twitter':
                 keyword = item.trend || item.name || item.query || `Trend ${index + 1}`;
-                volume = item.tweet_volume || item.volume || Math.floor(Math.random() * 100000) + 10000;
-                growth = item.growth || `+${Math.floor(Math.random() * 50) + 5}%`;
+                volume = item.tweet_volume || item.volume || 0;
+                growth = item.growth || calculateGrowthFromVolume(volume);
                 category = item.category || 'General';
-                hashtags = item.hashtags || [`#${keyword.replace('#', '')}`, '#trending', '#viral'];
+                hashtags = item.hashtags || extractHashtagsFromText(keyword);
                 peakTime = item.peak_time || '14:00-16:00 UTC';
                 demographics = {
                     age: item.demographics?.age || '25-34',
-                    interests: item.demographics?.interests || ['Technology', 'Social Media', 'Trends']
+                    interests: item.demographics?.interests || ['Technology', 'Social Media']
                 };
                 break;
 
             case 'instagram':
-                keyword = item.hashtag || item.caption?.substring(0, 50) || `Trend ${index + 1}`;
-                volume = item.likes_count || item.comments_count || Math.floor(Math.random() * 50000) + 5000;
-                growth = `+${Math.floor(Math.random() * 40) + 10}%`;
+                // Extract from Instagram post data
+                keyword = extractKeywordFromCaption(item.caption) || item.hashtags?.[0]?.replace('#', '') || `Post ${index + 1}`;
+                volume = item.likesCount || item.likes_count || item.likes || 0;
+                growth = calculateGrowthFromEngagement(item.likesCount, item.commentsCount);
                 category = 'Lifestyle';
-                hashtags = item.hashtags || [`#${keyword.replace('#', '')}`, '#instagram', '#viral'];
+                hashtags = item.hashtags || extractHashtagsFromText(item.caption) || [`#${keyword}`];
                 peakTime = '11:00-13:00 UTC';
                 demographics = {
                     age: '18-34',
@@ -158,11 +170,12 @@ const transformTrendData = (apifyData, platform = "twitter") => {
                 break;
 
             case 'tiktok':
-                keyword = item.desc || item.hashtag || `Trend ${index + 1}`;
-                volume = item.play_count || item.digg_count || Math.floor(Math.random() * 200000) + 20000;
-                growth = `+${Math.floor(Math.random() * 60) + 15}%`;
+                // Extract from TikTok video data
+                keyword = extractKeywordFromDescription(item.desc || item.description) || `Video ${index + 1}`;
+                volume = item.playCount || item.play_count || item.diggCount || item.digg_count || 0;
+                growth = calculateGrowthFromViews(volume);
                 category = 'Entertainment';
-                hashtags = item.hashtags || [`#${keyword.replace('#', '')}`, '#fyp', '#viral'];
+                hashtags = item.hashtags || extractHashtagsFromText(item.desc || item.description) || [`#${keyword}`];
                 peakTime = '18:00-20:00 UTC';
                 demographics = {
                     age: '16-24',
@@ -171,11 +184,11 @@ const transformTrendData = (apifyData, platform = "twitter") => {
                 break;
 
             case 'facebook':
-                keyword = item.text?.substring(0, 50) || `Trend ${index + 1}`;
-                volume = item.reactions || item.shares || Math.floor(Math.random() * 30000) + 3000;
-                growth = `+${Math.floor(Math.random() * 35) + 8}%`;
+                keyword = extractKeywordFromText(item.text) || `Post ${index + 1}`;
+                volume = (item.reactions || 0) + (item.shares || 0) + (item.comments || 0);
+                growth = calculateGrowthFromEngagement(item.reactions, item.comments);
                 category = 'Community';
-                hashtags = [`#${keyword.replace('#', '')}`, '#facebook', '#community'];
+                hashtags = extractHashtagsFromText(item.text) || [`#${keyword}`];
                 peakTime = '13:00-15:00 UTC';
                 demographics = {
                     age: '25-45',
@@ -184,11 +197,11 @@ const transformTrendData = (apifyData, platform = "twitter") => {
                 break;
 
             case 'youtube':
-                keyword = item.title?.substring(0, 50) || `Trend ${index + 1}`;
-                volume = item.view_count || Math.floor(Math.random() * 500000) + 50000;
-                growth = `+${Math.floor(Math.random() * 45) + 12}%`;
+                keyword = extractKeywordFromTitle(item.title) || `Video ${index + 1}`;
+                volume = item.viewCount || item.view_count || 0;
+                growth = calculateGrowthFromViews(volume);
                 category = 'Video Content';
-                hashtags = [`#${keyword.replace('#', '')}`, '#youtube', '#video'];
+                hashtags = item.tags || [`#${keyword}`];
                 peakTime = '19:00-21:00 UTC';
                 demographics = {
                     age: '18-35',
@@ -198,10 +211,10 @@ const transformTrendData = (apifyData, platform = "twitter") => {
 
             default:
                 keyword = item.trend || item.name || `Trend ${index + 1}`;
-                volume = Math.floor(Math.random() * 100000) + 10000;
-                growth = `+${Math.floor(Math.random() * 50) + 5}%`;
+                volume = 0;
+                growth = '+0%';
                 category = 'General';
-                hashtags = [`#${keyword.replace('#', '')}`, '#trending'];
+                hashtags = [`#${keyword}`];
                 peakTime = '14:00-16:00 UTC';
                 demographics = {
                     age: '25-34',
@@ -209,30 +222,125 @@ const transformTrendData = (apifyData, platform = "twitter") => {
                 };
         }
 
+        // Calculate trend score based on real engagement data
+        const trendScore = calculateTrendScore(volume, platform);
+
         return {
             id: index + 1,
-            keyword: keyword.replace('#', '').substring(0, 100), // Limit keyword length
+            keyword: cleanKeyword(keyword),
             category,
-            trendScore: Math.floor(Math.random() * 30) + 70, // Random score between 70-100
-            volume: typeof volume === 'number' ? volume : parseInt(volume) || Math.floor(Math.random() * 100000) + 10000,
+            trendScore,
+            volume: typeof volume === 'number' ? volume : parseInt(volume) || 0,
             growth,
             platforms: [platform],
-            relatedHashtags: hashtags.slice(0, 5), // Limit to 5 hashtags
+            relatedHashtags: hashtags.slice(0, 5),
             peakTime,
             demographics
         };
     });
 };
 
+// Helper functions for data extraction and processing
+const extractKeywordFromCaption = (caption) => {
+    if (!caption) return null;
+    // Extract first meaningful word or phrase from caption
+    const words = caption.split(' ').filter(word => word.length > 3 && !word.startsWith('#') && !word.startsWith('@'));
+    return words.slice(0, 2).join(' ') || null;
+};
+
+const extractKeywordFromDescription = (description) => {
+    if (!description) return null;
+    // Extract meaningful content from TikTok description
+    const words = description.split(' ').filter(word => word.length > 3 && !word.startsWith('#') && !word.startsWith('@'));
+    return words.slice(0, 2).join(' ') || null;
+};
+
+const extractKeywordFromText = (text) => {
+    if (!text) return null;
+    const words = text.split(' ').filter(word => word.length > 3 && !word.startsWith('#') && !word.startsWith('@'));
+    return words.slice(0, 2).join(' ') || null;
+};
+
+const extractKeywordFromTitle = (title) => {
+    if (!title) return null;
+    const words = title.split(' ').filter(word => word.length > 3);
+    return words.slice(0, 3).join(' ') || null;
+};
+
+const extractHashtagsFromText = (text) => {
+    if (!text) return [];
+    const hashtagRegex = /#[\w]+/g;
+    const matches = text.match(hashtagRegex) || [];
+    return matches.slice(0, 5); // Limit to 5 hashtags
+};
+
+const cleanKeyword = (keyword) => {
+    if (!keyword) return 'Unknown';
+    return keyword.replace(/[#@]/g, '').substring(0, 100).trim();
+};
+
+const calculateGrowthFromVolume = (volume) => {
+    if (volume > 100000) return '+50%';
+    if (volume > 50000) return '+35%';
+    if (volume > 10000) return '+25%';
+    if (volume > 1000) return '+15%';
+    return '+5%';
+};
+
+const calculateGrowthFromEngagement = (likes, comments) => {
+    const total = (likes || 0) + (comments || 0);
+    if (total > 10000) return '+40%';
+    if (total > 5000) return '+30%';
+    if (total > 1000) return '+20%';
+    return '+10%';
+};
+
+const calculateGrowthFromViews = (views) => {
+    if (views > 1000000) return '+60%';
+    if (views > 500000) return '+45%';
+    if (views > 100000) return '+30%';
+    if (views > 10000) return '+20%';
+    return '+10%';
+};
+
+const calculateTrendScore = (volume, platform) => {
+    let score = 50; // Base score
+    
+    switch (platform) {
+        case 'twitter':
+            if (volume > 100000) score = 95;
+            else if (volume > 50000) score = 85;
+            else if (volume > 10000) score = 75;
+            else if (volume > 1000) score = 65;
+            break;
+        case 'instagram':
+            if (volume > 50000) score = 95;
+            else if (volume > 20000) score = 85;
+            else if (volume > 5000) score = 75;
+            else if (volume > 1000) score = 65;
+            break;
+        case 'tiktok':
+            if (volume > 1000000) score = 95;
+            else if (volume > 500000) score = 85;
+            else if (volume > 100000) score = 75;
+            else if (volume > 10000) score = 65;
+            break;
+        default:
+            score = Math.min(50 + (volume / 1000), 95);
+    }
+    
+    return Math.round(score);
+};
+
 // Enhanced function to fetch trends from Apify using platform-specific actors
 const fetchTrendsFromApify = async (platform = "twitter") => {
     try {
-        console.log(`Fetching trends for platform: ${platform} via Apify API`);
+        console.log(`Fetching trends for platform: ${platform} via direct API call`);
         
         const platformConfig = PLATFORM_ACTORS[platform];
         if (!platformConfig) {
-            console.log(`No actor configuration found for platform: ${platform}, using fallback data`);
-            return getFallbackTrends(platform);
+            console.log(`No actor configuration found for platform: ${platform}`);
+            return [];
         }
 
         const actorId = platformConfig.actorId;
@@ -241,28 +349,32 @@ const fetchTrendsFromApify = async (platform = "twitter") => {
         const token = process.env.APIFY_API_TOKEN;
 
         if (!token) {
-            console.log('APIFY_API_TOKEN not found, using fallback data');
-            return getFallbackTrends(platform);
+            console.log('APIFY_API_TOKEN not found');
+            return [];
         }
 
-        // Start the actor run
+        // Start the actor run with correct input structure
         const startRunUrl = `https://api.apify.com/v2/acts/${safeActorId}/runs?token=${token}`;
-        console.log(`Starting Apify actor run for ${platform}...`);
+        console.log(`Calling Apify API Step 1: POST to start run...`);
+        console.log(`Actor ID: ${actorId}`);
+        console.log(`Input:`, JSON.stringify(actorInput, null, 2));
         
-        const startResponse = await axios.post(startRunUrl, actorInput, {
+        const startResponse = await axios.post(startRunUrl, {
+            input: actorInput  // Wrap input in 'input' object as required by Apify
+        }, {
             headers: { 'Content-Type': 'application/json' },
-            timeout: 10000 // 10 second timeout
+            timeout: 15000
         });
 
         const runId = startResponse.data.data.id;
         const datasetId = startResponse.data.data.defaultDatasetId;
         console.log(`Actor run started. Run ID: ${runId}, Dataset ID: ${datasetId}`);
 
-        // Poll for completion with timeout
+        // Poll for completion with extended timeout for real data
         let items = [];
         let runStatus = 'RUNNING';
         let attempts = 0;
-        const maxAttempts = 15; // Max 30 seconds
+        const maxAttempts = 30; // Extended to 60 seconds for real API calls
         
         while (runStatus !== 'SUCCEEDED' && attempts < maxAttempts) {
             const statusUrl = `https://api.apify.com/v2/acts/${safeActorId}/runs/${runId}?token=${token}`;
@@ -274,7 +386,7 @@ const fetchTrendsFromApify = async (platform = "twitter") => {
                 if (runStatus === 'SUCCEEDED') {
                     console.log('Actor run completed successfully. Fetching results...');
                     const getResultsUrl = `https://api.apify.com/v2/datasets/${datasetId}/items?token=${token}`;
-                    const resultsResponse = await axios.get(getResultsUrl, { timeout: 10000 });
+                    const resultsResponse = await axios.get(getResultsUrl, { timeout: 15000 });
                     items = resultsResponse.data;
                     break;
                 } else if (runStatus === 'FAILED' || runStatus === 'ABORTED') {
@@ -292,66 +404,23 @@ const fetchTrendsFromApify = async (platform = "twitter") => {
         }
 
         if (items.length === 0) {
-            console.log(`No items retrieved for ${platform}, using fallback data`);
-            return getFallbackTrends(platform);
+            console.log(`No items retrieved for ${platform}`);
+            return [];
         }
 
         console.log(`Retrieved ${items.length} items from Apify for ${platform}`);
+        console.log('Sample item:', JSON.stringify(items[0], null, 2));
+        
         return transformTrendData(items, platform);
 
     } catch (error) {
-        console.error(`Error fetching trends from Apify for ${platform}:`, error.message);
-        return getFallbackTrends(platform);
+        console.error(`Error fetching trends from Apify direct API:`, {
+            error: error.response?.data || error.message,
+            platform,
+            status: error.response?.status
+        });
+        return [];
     }
-};
-
-// Fallback trends data for each platform
-const getFallbackTrends = (platform) => {
-    const fallbackData = {
-        twitter: [
-            { keyword: "AI Revolution", category: "Technology", volume: 125000, growth: "+23%" },
-            { keyword: "Climate Action", category: "Environment", volume: 87000, growth: "+15%" },
-            { keyword: "Remote Work", category: "Business", volume: 95000, growth: "+18%" }
-        ],
-        instagram: [
-            { keyword: "Sustainable Fashion", category: "Lifestyle", volume: 65000, growth: "+28%" },
-            { keyword: "Wellness Journey", category: "Health", volume: 78000, growth: "+22%" },
-            { keyword: "Travel Photography", category: "Travel", volume: 92000, growth: "+31%" }
-        ],
-        tiktok: [
-            { keyword: "Dance Challenge", category: "Entertainment", volume: 250000, growth: "+45%" },
-            { keyword: "Cooking Hacks", category: "Food", volume: 180000, growth: "+38%" },
-            { keyword: "Study Tips", category: "Education", volume: 120000, growth: "+25%" }
-        ],
-        facebook: [
-            { keyword: "Community Events", category: "Community", volume: 45000, growth: "+12%" },
-            { keyword: "Local Business", category: "Business", volume: 38000, growth: "+16%" },
-            { keyword: "Family Recipes", category: "Food", volume: 52000, growth: "+19%" }
-        ],
-        youtube: [
-            { keyword: "Tech Reviews", category: "Technology", volume: 320000, growth: "+27%" },
-            { keyword: "DIY Projects", category: "Lifestyle", volume: 280000, growth: "+33%" },
-            { keyword: "Gaming Tutorials", category: "Gaming", volume: 450000, growth: "+41%" }
-        ]
-    };
-
-    const platformData = fallbackData[platform] || fallbackData.twitter;
-    
-    return platformData.map((item, index) => ({
-        id: index + 1,
-        keyword: item.keyword,
-        category: item.category,
-        trendScore: Math.floor(Math.random() * 30) + 70,
-        volume: item.volume,
-        growth: item.growth,
-        platforms: [platform],
-        relatedHashtags: [`#${item.keyword.replace(/\s+/g, '')}`, '#trending', '#viral'],
-        peakTime: getBestPostTime(platform),
-        demographics: {
-            age: platform === 'tiktok' ? '16-24' : platform === 'facebook' ? '25-45' : '18-34',
-            interests: [item.category, 'Social Media', 'Trends']
-        }
-    }));
 };
 
 // Platform-specific optimization configurations
@@ -723,19 +792,26 @@ app.post("/api/auth/login", async (req, res) => {
     res.json({ token, user: { id: user.id, username: user.username, email: user.email, profile: user.profile } });
 });
 
-// Enhanced Trends Routes with platform support
+// Enhanced Trends Routes with platform support - REAL DATA ONLY
 app.get("/api/trends", authenticateToken, async (req, res) => {
     try {
         const { platform = "twitter", limit = 20 } = req.query;
         
         console.log(`API: Fetching trends for platform: ${platform}, limit: ${limit}`);
         
+        // Fetch ONLY real data from Apify - no fallbacks
         let trends = await fetchTrendsFromApify(platform);
+        
+        // If no real data available, return empty array instead of fallback
+        if (!trends || trends.length === 0) {
+            console.log(`No real trends data available for ${platform}`);
+            return res.json([]);
+        }
         
         // Limit results
         const limitedTrends = trends.slice(0, parseInt(limit));
         
-        console.log(`API: Returning ${limitedTrends.length} trends for ${platform}`);
+        console.log(`API: Returning ${limitedTrends.length} REAL trends for ${platform}`);
         res.json(limitedTrends);
     } catch (error) {
         console.error('Error in /api/trends:', error);
@@ -790,6 +866,6 @@ app.listen(PORT, () => {
     console.log(`🚀 TrendCraft API server running on http://localhost:${PORT}`);
     console.log(`🎯 Frontend should run on: http://localhost:5173`);
     console.log(`🤖 Gemini AI: ${process.env.GEMINI_API_KEY ? "Configured" : "Not configured"}`);
-    console.log(`🕷️ Apify: ${process.env.APIFY_API_TOKEN ? "Configured" : "Using fallback data"}`);
+    console.log(`🕷️ Apify: ${process.env.APIFY_API_TOKEN ? "Configured" : "Using real data only"}`);
     console.log('✅ Server started successfully!');
 });
