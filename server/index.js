@@ -202,6 +202,64 @@ const PLATFORM_CONFIGS = {
     }
 };
 
+// ROBUST SYSTEM PROMPT - This is the key fix for clean content generation
+const createRobustSystemPrompt = (topic, platform, tone, targetAudience, includeHashtags) => {
+    const platformConfig = PLATFORM_CONFIGS[platform] || PLATFORM_CONFIGS.twitter;
+    
+    return `You are TrendCraft AI, an expert social media content generator. Your ONLY job is to generate ONE piece of ready-to-publish content for ${platform}.
+
+CRITICAL RULES - FOLLOW EXACTLY:
+1. Generate ONLY the final content text - no explanations, no options, no meta-commentary
+2. Do NOT include phrases like "Here's a post", "Option 1", "Tweet 1", "**Option**", or any similar introductory text
+3. Do NOT provide multiple versions or choices - generate exactly ONE piece of content
+4. Do NOT explain what you're doing or why
+5. The response should be ONLY the content that can be directly posted to ${platform}
+6. Maximum ${platformConfig.maxCharacters} characters - strictly enforce this limit
+7. Use ${tone} tone throughout
+8. Target audience: ${targetAudience || 'general audience'}
+9. ${includeHashtags ? `Include ${platformConfig.optimalHashtags} relevant hashtags` : 'Do not include hashtags'}
+
+PLATFORM-SPECIFIC REQUIREMENTS FOR ${platform.toUpperCase()}:
+${platform === 'twitter' ? `
+- Keep under 280 characters
+- Be punchy and engaging
+- Include 1-2 hashtags maximum if requested
+- Use engaging questions or calls for interaction
+- Consider emojis sparingly but effectively` : ''}
+
+${platform === 'linkedin' ? `
+- Professional tone with personal insights
+- Can be longer form (up to 3000 characters)
+- Include 3-5 industry hashtags if requested
+- Focus on value and professional growth
+- Include professional experiences or lessons` : ''}
+
+${platform === 'instagram' ? `
+- Visual-first approach
+- Use 8-15 hashtags if requested
+- Include emojis and line breaks for readability
+- Focus on lifestyle and visual appeal
+- Include "link in bio" style CTAs` : ''}
+
+${platform === 'facebook' ? `
+- Community-focused content
+- Can be longer form
+- Use 1-3 hashtags if requested
+- Focus on shareable, valuable content
+- Encourage community interaction` : ''}
+
+${platform === 'tiktok' ? `
+- Video-first content description
+- Use 3-7 hashtags including trending ones if requested
+- Focus on entertainment and trends
+- Include challenge or duet CTAs
+- Keep descriptions engaging and fun` : ''}
+
+TOPIC: ${topic}
+
+Generate the content now - ONLY the content, nothing else:`;
+};
+
 // Enhanced helper function to generate content with platform optimization
 const generateContentWithAI = async (
     topic,
@@ -213,67 +271,22 @@ const generateContentWithAI = async (
     try {
         const platformConfig = PLATFORM_CONFIGS[platform] || PLATFORM_CONFIGS.twitter;
         
-        const prompt = `
-You are an expert social media content creator specializing in ${platform}. Generate engaging content optimized specifically for ${platform} based on these requirements:
-
-Topic: ${topic}
-Platform: ${platform}
-Tone: ${tone}
-Target Audience: ${targetAudience || "general audience"}
-Include Hashtags: ${includeHashtags ? "Yes" : "No"}
-
-PLATFORM-SPECIFIC OPTIMIZATION REQUIREMENTS:
-
-Character Limit: Strictly adhere to ${platformConfig.maxCharacters} characters maximum.
-
-${platform === 'twitter' ? `
-- Keep it concise and punchy (under 280 characters)
-- Use 1-2 highly relevant hashtags only
-- Include engaging questions or calls for retweets
-- Consider thread format if more content is needed
-- Suggest visual elements: images, GIFs, or short videos
-` : ''}
-
-${platform === 'linkedin' ? `
-- Professional tone with personal insights (up to 3000 characters)
-- Use 3-5 industry-specific hashtags
-- Include professional experiences or lessons learned
-- Suggest CTAs like "Share your thoughts" or "Connect for more insights"
-- Recommend professional visuals: infographics, team photos, industry charts
-` : ''}
-
-${platform === 'instagram' ? `
-- Visual-first approach (up to 2200 characters)
-- Use 8-15 hashtags strategically (mix trending and niche)
-- Include "Link in bio" CTAs
-- Suggest high-quality visual content requirements
-- Use emojis and line breaks for readability
-- Recommend carousel posts or Reels for engagement
-` : ''}
-
-${platform === 'facebook' ? `
-- Community-focused content (can be longer form)
-- Use 1-3 community or local hashtags
-- Include shareable, valuable content
-- Suggest CTAs like "Share if you agree" or "Join our community"
-- Recommend engaging visuals or Facebook Live content
-` : ''}
-
-${platform === 'tiktok' ? `
-- Video-first content strategy (up to 2200 characters for description)
-- Use 3-7 hashtags including trending challenges
-- Include CTAs like "Duet this" or "Try this challenge"
-- Suggest vertical video concepts (9:16 ratio)
-- Recommend trending sounds and quick hooks
-- Keep video concepts under 60 seconds
-` : ''}
-
-Generate ONLY the optimized content text. Include platform-appropriate CTAs and visual suggestions in the content where natural.
-`;
+        // Use the robust system prompt
+        const prompt = createRobustSystemPrompt(topic, platform, tone, targetAudience, includeHashtags);
 
         const result = await model.generateContent(prompt);
         const response = await result.response;
         let content = response.text().trim();
+        
+        // Clean up any remaining unwanted prefixes or formatting
+        content = content
+            .replace(/^\*\*.*?\*\*\s*/g, '') // Remove **Option 1**, **Tweet 1**, etc.
+            .replace(/^Here's.*?:\s*/gi, '') // Remove "Here's a post:", etc.
+            .replace(/^Option \d+.*?:\s*/gi, '') // Remove "Option 1:", etc.
+            .replace(/^\d+\.\s*/g, '') // Remove numbered lists
+            .replace(/^-\s*/g, '') // Remove bullet points
+            .replace(/^\*\s*/g, '') // Remove asterisk bullets
+            .trim();
         
         // Ensure content doesn't exceed platform limits
         if (content.length > platformConfig.maxCharacters) {
