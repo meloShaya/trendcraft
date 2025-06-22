@@ -91,7 +91,7 @@ const fetchTrendsFromApify = async (platform = "twitter") => {
 
         if (platform === "twitter" || platform === "x") {
             actorId = process.env.TWITTER_TRENDS_ACTOR_ID;
-            actorInput = { location: "United States", maxTrends: 20 };
+            actorInput = { location: "United States", maxTrends: 10 };
         } else {
             actorId = process.env.SOCIAL_INSIGHT_ACTOR_ID;
             actorInput = { platform: platform, maxResults: 20, sortBy: "trending" };
