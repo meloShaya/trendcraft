@@ -128,158 +128,195 @@ const PLATFORM_ACTORS = {
     }
 };
 
-// Enhanced helper function to transform platform-specific data from real APIs
+// STRICT data transformation - ONLY use real API data, NO fallbacks
 const transformTrendData = (apifyData, platform = "twitter") => {
-    if (!apifyData || !Array.isArray(apifyData)) {
-        console.log("Invalid Apify data received:", apifyData);
+    if (!apifyData || !Array.isArray(apifyData) || apifyData.length === 0) {
+        console.log(`No valid data received for ${platform}:`, apifyData);
         return [];
     }
 
-    console.log(`Transforming ${apifyData.length} items for platform: ${platform}`);
+    console.log(`Transforming ${apifyData.length} REAL items for platform: ${platform}`);
+    console.log('Sample raw data:', JSON.stringify(apifyData[0], null, 2));
 
-    return apifyData.map((item, index) => {
-        let keyword, volume, growth, category, hashtags, peakTime, demographics;
+    const transformedTrends = [];
 
-        // Platform-specific data extraction from REAL API responses
+    for (let index = 0; index < apifyData.length; index++) {
+        const item = apifyData[index];
+        let trendData = null;
+
+        // Platform-specific data extraction from REAL API responses ONLY
         switch (platform) {
             case 'twitter':
-                keyword = item.trend || item.name || item.query || `Trend ${index + 1}`;
-                volume = item.tweet_volume || item.volume || 0;
-                growth = item.growth || calculateGrowthFromVolume(volume);
-                category = item.category || 'General';
-                hashtags = item.hashtags || extractHashtagsFromText(keyword);
-                peakTime = item.peak_time || '14:00-16:00 UTC';
-                demographics = {
-                    age: item.demographics?.age || '25-34',
-                    interests: item.demographics?.interests || ['Technology', 'Social Media']
-                };
+                // Extract ONLY real Twitter trend data
+                if (item.trend || item.name || item.query) {
+                    const keyword = item.trend || item.name || item.query;
+                    // Skip if it's generic like "Trend 1", "Trend 2" etc.
+                    if (keyword.match(/^Trend \d+$/i)) {
+                        console.log(`Skipping generic trend: ${keyword}`);
+                        continue;
+                    }
+                    
+                    trendData = {
+                        keyword: cleanKeyword(keyword),
+                        category: item.category || null, // Only use if exists, no fallback
+                        volume: item.tweet_volume || item.volume || 0,
+                        growth: item.growth || calculateGrowthFromVolume(item.tweet_volume || item.volume || 0),
+                        hashtags: item.hashtags || extractHashtagsFromText(keyword),
+                        peakTime: item.peak_time || null, // No fallback
+                        demographics: item.demographics || null // No fallback
+                    };
+                }
                 break;
 
             case 'instagram':
                 // Extract from Instagram post data
-                keyword = extractKeywordFromCaption(item.caption) || item.hashtags?.[0]?.replace('#', '') || `Post ${index + 1}`;
-                volume = item.likesCount || item.likes_count || item.likes || 0;
-                growth = calculateGrowthFromEngagement(item.likesCount, item.commentsCount);
-                category = 'Lifestyle';
-                hashtags = item.hashtags || extractHashtagsFromText(item.caption) || [`#${keyword}`];
-                peakTime = '11:00-13:00 UTC';
-                demographics = {
-                    age: '18-34',
-                    interests: ['Lifestyle', 'Fashion', 'Photography']
-                };
+                if (item.caption || item.hashtags) {
+                    const keyword = extractKeywordFromCaption(item.caption) || 
+                                  (item.hashtags && item.hashtags[0] ? item.hashtags[0].replace('#', '') : null);
+                    
+                    if (keyword) {
+                        trendData = {
+                            keyword: cleanKeyword(keyword),
+                            category: null, // Instagram doesn't provide categories
+                            volume: item.likesCount || item.likes_count || item.likes || 0,
+                            growth: calculateGrowthFromEngagement(item.likesCount, item.commentsCount),
+                            hashtags: item.hashtags || extractHashtagsFromText(item.caption),
+                            peakTime: null, // No real peak time data from Instagram API
+                            demographics: null // No demographics from Instagram API
+                        };
+                    }
+                }
                 break;
 
             case 'tiktok':
                 // Extract from TikTok video data
-                keyword = extractKeywordFromDescription(item.desc || item.description) || `Video ${index + 1}`;
-                volume = item.playCount || item.play_count || item.diggCount || item.digg_count || 0;
-                growth = calculateGrowthFromViews(volume);
-                category = 'Entertainment';
-                hashtags = item.hashtags || extractHashtagsFromText(item.desc || item.description) || [`#${keyword}`];
-                peakTime = '18:00-20:00 UTC';
-                demographics = {
-                    age: '16-24',
-                    interests: ['Entertainment', 'Music', 'Dance']
-                };
+                if (item.desc || item.description || item.title) {
+                    const keyword = extractKeywordFromDescription(item.desc || item.description || item.title);
+                    
+                    if (keyword) {
+                        trendData = {
+                            keyword: cleanKeyword(keyword),
+                            category: null, // TikTok doesn't provide categories
+                            volume: item.playCount || item.play_count || item.diggCount || item.digg_count || 0,
+                            growth: calculateGrowthFromViews(item.playCount || item.play_count || 0),
+                            hashtags: item.hashtags || extractHashtagsFromText(item.desc || item.description),
+                            peakTime: null, // No real peak time data
+                            demographics: null // No demographics data
+                        };
+                    }
+                }
                 break;
 
             case 'facebook':
-                keyword = extractKeywordFromText(item.text) || `Post ${index + 1}`;
-                volume = (item.reactions || 0) + (item.shares || 0) + (item.comments || 0);
-                growth = calculateGrowthFromEngagement(item.reactions, item.comments);
-                category = 'Community';
-                hashtags = extractHashtagsFromText(item.text) || [`#${keyword}`];
-                peakTime = '13:00-15:00 UTC';
-                demographics = {
-                    age: '25-45',
-                    interests: ['Community', 'Family', 'Local News']
-                };
+                if (item.text || item.message) {
+                    const keyword = extractKeywordFromText(item.text || item.message);
+                    
+                    if (keyword) {
+                        trendData = {
+                            keyword: cleanKeyword(keyword),
+                            category: null,
+                            volume: (item.reactions || 0) + (item.shares || 0) + (item.comments || 0),
+                            growth: calculateGrowthFromEngagement(item.reactions, item.comments),
+                            hashtags: extractHashtagsFromText(item.text || item.message),
+                            peakTime: null,
+                            demographics: null
+                        };
+                    }
+                }
                 break;
 
             case 'youtube':
-                keyword = extractKeywordFromTitle(item.title) || `Video ${index + 1}`;
-                volume = item.viewCount || item.view_count || 0;
-                growth = calculateGrowthFromViews(volume);
-                category = 'Video Content';
-                hashtags = item.tags || [`#${keyword}`];
-                peakTime = '19:00-21:00 UTC';
-                demographics = {
-                    age: '18-35',
-                    interests: ['Video Content', 'Entertainment', 'Education']
-                };
+                if (item.title) {
+                    const keyword = extractKeywordFromTitle(item.title);
+                    
+                    if (keyword) {
+                        trendData = {
+                            keyword: cleanKeyword(keyword),
+                            category: null,
+                            volume: item.viewCount || item.view_count || 0,
+                            growth: calculateGrowthFromViews(item.viewCount || item.view_count || 0),
+                            hashtags: item.tags || extractHashtagsFromText(item.title),
+                            peakTime: null,
+                            demographics: null
+                        };
+                    }
+                }
                 break;
-
-            default:
-                keyword = item.trend || item.name || `Trend ${index + 1}`;
-                volume = 0;
-                growth = '+0%';
-                category = 'General';
-                hashtags = [`#${keyword}`];
-                peakTime = '14:00-16:00 UTC';
-                demographics = {
-                    age: '25-34',
-                    interests: ['General']
-                };
         }
 
-        // Calculate trend score based on real engagement data
-        const trendScore = calculateTrendScore(volume, platform);
+        // Only add if we have real data
+        if (trendData && trendData.keyword && trendData.keyword !== 'Unknown') {
+            const trendScore = calculateTrendScore(trendData.volume, platform);
 
-        return {
-            id: index + 1,
-            keyword: cleanKeyword(keyword),
-            category,
-            trendScore,
-            volume: typeof volume === 'number' ? volume : parseInt(volume) || 0,
-            growth,
-            platforms: [platform],
-            relatedHashtags: hashtags.slice(0, 5),
-            peakTime,
-            demographics
-        };
-    });
+            transformedTrends.push({
+                id: transformedTrends.length + 1,
+                keyword: trendData.keyword,
+                category: trendData.category, // Can be null
+                trendScore,
+                volume: trendData.volume,
+                growth: trendData.growth,
+                platforms: [platform],
+                relatedHashtags: trendData.hashtags.slice(0, 5),
+                peakTime: trendData.peakTime, // Can be null
+                demographics: trendData.demographics // Can be null
+            });
+        }
+    }
+
+    console.log(`Successfully transformed ${transformedTrends.length} REAL trends for ${platform}`);
+    return transformedTrends;
 };
 
 // Helper functions for data extraction and processing
 const extractKeywordFromCaption = (caption) => {
-    if (!caption) return null;
+    if (!caption || typeof caption !== 'string') return null;
     // Extract first meaningful word or phrase from caption
-    const words = caption.split(' ').filter(word => word.length > 3 && !word.startsWith('#') && !word.startsWith('@'));
-    return words.slice(0, 2).join(' ') || null;
+    const words = caption.split(' ')
+        .filter(word => word.length > 3 && !word.startsWith('#') && !word.startsWith('@'))
+        .slice(0, 3);
+    return words.length > 0 ? words.join(' ') : null;
 };
 
 const extractKeywordFromDescription = (description) => {
-    if (!description) return null;
+    if (!description || typeof description !== 'string') return null;
     // Extract meaningful content from TikTok description
-    const words = description.split(' ').filter(word => word.length > 3 && !word.startsWith('#') && !word.startsWith('@'));
-    return words.slice(0, 2).join(' ') || null;
+    const words = description.split(' ')
+        .filter(word => word.length > 3 && !word.startsWith('#') && !word.startsWith('@'))
+        .slice(0, 3);
+    return words.length > 0 ? words.join(' ') : null;
 };
 
 const extractKeywordFromText = (text) => {
-    if (!text) return null;
-    const words = text.split(' ').filter(word => word.length > 3 && !word.startsWith('#') && !word.startsWith('@'));
-    return words.slice(0, 2).join(' ') || null;
+    if (!text || typeof text !== 'string') return null;
+    const words = text.split(' ')
+        .filter(word => word.length > 3 && !word.startsWith('#') && !word.startsWith('@'))
+        .slice(0, 3);
+    return words.length > 0 ? words.join(' ') : null;
 };
 
 const extractKeywordFromTitle = (title) => {
-    if (!title) return null;
-    const words = title.split(' ').filter(word => word.length > 3);
-    return words.slice(0, 3).join(' ') || null;
+    if (!title || typeof title !== 'string') return null;
+    const words = title.split(' ')
+        .filter(word => word.length > 3)
+        .slice(0, 4);
+    return words.length > 0 ? words.join(' ') : null;
 };
 
 const extractHashtagsFromText = (text) => {
-    if (!text) return [];
+    if (!text || typeof text !== 'string') return [];
     const hashtagRegex = /#[\w]+/g;
     const matches = text.match(hashtagRegex) || [];
     return matches.slice(0, 5); // Limit to 5 hashtags
 };
 
 const cleanKeyword = (keyword) => {
-    if (!keyword) return 'Unknown';
-    return keyword.replace(/[#@]/g, '').substring(0, 100).trim();
+    if (!keyword || typeof keyword !== 'string') return null;
+    const cleaned = keyword.replace(/[#@]/g, '').substring(0, 100).trim();
+    return cleaned.length > 0 ? cleaned : null;
 };
 
 const calculateGrowthFromVolume = (volume) => {
+    if (!volume || volume === 0) return '+0%';
     if (volume > 100000) return '+50%';
     if (volume > 50000) return '+35%';
     if (volume > 10000) return '+25%';
@@ -289,6 +326,7 @@ const calculateGrowthFromVolume = (volume) => {
 
 const calculateGrowthFromEngagement = (likes, comments) => {
     const total = (likes || 0) + (comments || 0);
+    if (total === 0) return '+0%';
     if (total > 10000) return '+40%';
     if (total > 5000) return '+30%';
     if (total > 1000) return '+20%';
@@ -296,6 +334,7 @@ const calculateGrowthFromEngagement = (likes, comments) => {
 };
 
 const calculateGrowthFromViews = (views) => {
+    if (!views || views === 0) return '+0%';
     if (views > 1000000) return '+60%';
     if (views > 500000) return '+45%';
     if (views > 100000) return '+30%';
@@ -304,6 +343,8 @@ const calculateGrowthFromViews = (views) => {
 };
 
 const calculateTrendScore = (volume, platform) => {
+    if (!volume || volume === 0) return 50;
+    
     let score = 50; // Base score
     
     switch (platform) {
@@ -335,7 +376,7 @@ const calculateTrendScore = (volume, platform) => {
 // Enhanced function to fetch trends from Apify using platform-specific actors
 const fetchTrendsFromApify = async (platform = "twitter") => {
     try {
-        console.log(`Fetching trends for platform: ${platform} via direct API call`);
+        console.log(`Fetching REAL trends for platform: ${platform} via direct API call`);
         
         const platformConfig = PLATFORM_ACTORS[platform];
         if (!platformConfig) {
@@ -349,7 +390,7 @@ const fetchTrendsFromApify = async (platform = "twitter") => {
         const token = process.env.APIFY_API_TOKEN;
 
         if (!token) {
-            console.log('APIFY_API_TOKEN not found');
+            console.log('APIFY_API_TOKEN not found - cannot fetch real data');
             return [];
         }
 
@@ -391,7 +432,7 @@ const fetchTrendsFromApify = async (platform = "twitter") => {
                     break;
                 } else if (runStatus === 'FAILED' || runStatus === 'ABORTED') {
                     console.error(`Actor run ${runStatus} for platform ${platform}`);
-                    break;
+                    return [];
                 }
                 
                 console.log(`Run status: ${runStatus}. Attempt ${attempts + 1}/${maxAttempts}`);
@@ -399,19 +440,26 @@ const fetchTrendsFromApify = async (platform = "twitter") => {
                 attempts++;
             } catch (pollError) {
                 console.error('Error polling run status:', pollError.message);
-                break;
+                return [];
             }
         }
 
-        if (items.length === 0) {
-            console.log(`No items retrieved for ${platform}`);
+        if (!items || items.length === 0) {
+            console.log(`No items retrieved for ${platform} - returning empty array`);
             return [];
         }
 
-        console.log(`Retrieved ${items.length} items from Apify for ${platform}`);
-        console.log('Sample item:', JSON.stringify(items[0], null, 2));
+        console.log(`Retrieved ${items.length} raw items from Apify for ${platform}`);
+        console.log('Sample raw item:', JSON.stringify(items[0], null, 2));
         
-        return transformTrendData(items, platform);
+        // Transform ONLY real data - no fallbacks
+        const transformedTrends = transformTrendData(items, platform);
+        
+        if (transformedTrends.length === 0) {
+            console.log(`No valid trends extracted from ${platform} data`);
+        }
+        
+        return transformedTrends;
 
     } catch (error) {
         console.error(`Error fetching trends from Apify direct API:`, {
@@ -419,7 +467,7 @@ const fetchTrendsFromApify = async (platform = "twitter") => {
             platform,
             status: error.response?.status
         });
-        return [];
+        return []; // Return empty array instead of fallback data
     }
 };
 
@@ -797,14 +845,14 @@ app.get("/api/trends", authenticateToken, async (req, res) => {
     try {
         const { platform = "twitter", limit = 20 } = req.query;
         
-        console.log(`API: Fetching trends for platform: ${platform}, limit: ${limit}`);
+        console.log(`API: Fetching REAL trends for platform: ${platform}, limit: ${limit}`);
         
-        // Fetch ONLY real data from Apify - no fallbacks
+        // Fetch ONLY real data from Apify - NO fallbacks whatsoever
         let trends = await fetchTrendsFromApify(platform);
         
-        // If no real data available, return empty array instead of fallback
+        // If no real data available, return empty array - NO FALLBACKS
         if (!trends || trends.length === 0) {
-            console.log(`No real trends data available for ${platform}`);
+            console.log(`No real trends data available for ${platform} - returning empty array`);
             return res.json([]);
         }
         
@@ -866,6 +914,6 @@ app.listen(PORT, () => {
     console.log(`🚀 TrendCraft API server running on http://localhost:${PORT}`);
     console.log(`🎯 Frontend should run on: http://localhost:5173`);
     console.log(`🤖 Gemini AI: ${process.env.GEMINI_API_KEY ? "Configured" : "Not configured"}`);
-    console.log(`🕷️ Apify: ${process.env.APIFY_API_TOKEN ? "Configured" : "Using real data only"}`);
+    console.log(`🕷️ Apify: ${process.env.APIFY_API_TOKEN ? "Configured - REAL DATA ONLY" : "Not configured - NO FALLBACKS"}`);
     console.log('✅ Server started successfully!');
 });
