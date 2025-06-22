@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Sparkles, Copy, Send, RotateCcw, Zap, Target, Clock, TrendingUp, Settings, Eye } from 'lucide-react';
+import { Sparkles, Copy, Send, RotateCcw, Zap, Target, Clock, TrendingUp, Settings, Eye, Hash, MessageSquare } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import PlatformPreview from '../components/PlatformPreview';
 import PlatformConnections from '../components/PlatformConnections';
 import PublishingControls from '../components/PublishingControls';
 import ScheduleManager from '../components/ScheduleManager';
+import PlatformOptimizationPanel from '../components/PlatformOptimizationPanel';
 
 interface GeneratedContent {
   content: string;
@@ -19,6 +20,14 @@ interface GeneratedContent {
       retweets: number;
       comments: number;
     };
+  };
+  platformOptimization?: {
+    characterCount: number;
+    characterLimit: number;
+    hashtagCount: number;
+    optimalHashtags: number;
+    visualSuggestions: string[];
+    ctaSuggestions: string[];
   };
 }
 
@@ -50,6 +59,7 @@ const ContentGenerator: React.FC = () => {
   const [connectedPlatforms, setConnectedPlatforms] = useState<string[]>([]);
   const [isPublishing, setIsPublishing] = useState(false);
   const [trendNotification, setTrendNotification] = useState<string | null>(null);
+  const [showOptimization, setShowOptimization] = useState(false);
 
   // Check for trend data from sessionStorage on component mount
   useEffect(() => {
@@ -109,6 +119,7 @@ const ContentGenerator: React.FC = () => {
         const content = await response.json();
         setGeneratedContent(content);
         setActiveTab('preview');
+        setShowOptimization(true);
       }
     } catch (error) {
       console.error('Error generating content:', error);
@@ -215,6 +226,32 @@ const ContentGenerator: React.FC = () => {
     // In real implementation, pause/resume scheduled post
   };
 
+  const handleHashtagSuggestion = async (hashtags: string[]) => {
+    if (!generatedContent) return;
+    
+    // Add suggested hashtags to content
+    const hashtagString = hashtags.join(' ');
+    const updatedContent = `${generatedContent.content} ${hashtagString}`;
+    
+    setGeneratedContent(prev => prev ? {
+      ...prev,
+      content: updatedContent,
+      hashtags: [...prev.hashtags, ...hashtags]
+    } : null);
+  };
+
+  const handleCTASuggestion = async (cta: string) => {
+    if (!generatedContent) return;
+    
+    // Add CTA to content
+    const updatedContent = `${generatedContent.content} ${cta}`;
+    
+    setGeneratedContent(prev => prev ? {
+      ...prev,
+      content: updatedContent
+    } : null);
+  };
+
   const tabs = [
     { id: 'generate', label: 'Generate', icon: Sparkles, shortLabel: 'Gen' },
     { id: 'preview', label: 'Preview', icon: Eye, shortLabel: 'View' },
@@ -273,9 +310,9 @@ const ContentGenerator: React.FC = () => {
         {/* Tab Content */}
         <div className="p-3 sm:p-6">
           {activeTab === 'generate' && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 sm:gap-8">
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 sm:gap-8">
               {/* Input Form */}
-              <div className="space-y-4 sm:space-y-6">
+              <div className="xl:col-span-2 space-y-4 sm:space-y-6">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                     What's your topic or idea?
@@ -366,12 +403,10 @@ const ContentGenerator: React.FC = () => {
                   )}
                   {loading ? 'Generating...' : 'Generate Content'}
                 </button>
-              </div>
 
-              {/* Generated Content Preview */}
-              <div className="space-y-4 sm:space-y-6">
-                {generatedContent ? (
-                  <>
+                {/* Generated Content Preview */}
+                {generatedContent && (
+                  <div className="space-y-4 sm:space-y-6">
                     <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-3 sm:p-4">
                       <div className="flex items-center justify-between mb-3">
                         <h3 className="font-medium text-gray-900 dark:text-white text-sm sm:text-base">Generated Content</h3>
@@ -433,8 +468,26 @@ const ContentGenerator: React.FC = () => {
                         Preview
                       </button>
                     </div>
-                  </>
-                ) : (
+                  </div>
+                )}
+              </div>
+
+              {/* Platform Optimization Panel */}
+              {generatedContent && (
+                <div className="xl:col-span-1">
+                  <PlatformOptimizationPanel
+                    platform={generatedContent.platform}
+                    content={generatedContent.content}
+                    topic={formData.topic}
+                    category="technology"
+                    onHashtagSuggestion={handleHashtagSuggestion}
+                    onCTASuggestion={handleCTASuggestion}
+                  />
+                </div>
+              )}
+
+              {!generatedContent && (
+                <div className="xl:col-span-1">
                   <div className="text-center py-8 sm:py-12">
                     <Sparkles className="h-12 w-12 sm:h-16 sm:w-16 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
                     <h3 className="text-base sm:text-lg font-medium text-gray-900 dark:text-white mb-2">
@@ -444,38 +497,51 @@ const ContentGenerator: React.FC = () => {
                       Enter your topic and let our AI generate engaging social media content for you.
                     </p>
                   </div>
-                )}
-              </div>
+                </div>
+              )}
             </div>
           )}
 
           {activeTab === 'preview' && generatedContent && (
-            <div className="space-y-4 sm:space-y-6">
-              <PlatformPreview
-                platform={generatedContent.platform}
-                content={generatedContent.content}
-                userProfile={{
-                  name: user?.profile.name || 'Demo User',
-                  username: user?.username || 'demo_user',
-                  avatar: user?.profile.avatar || 'https://images.pexels.com/photos/614810/pexels-photo-614810.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&fit=crop',
-                  verified: true
-                }}
-                engagement={generatedContent.recommendations.engagementPrediction}
-              />
-              
-              <div className="flex flex-col sm:flex-row justify-center space-y-3 sm:space-y-0 sm:space-x-4">
-                <button
-                  onClick={() => setActiveTab('generate')}
-                  className="px-4 sm:px-6 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-sm sm:text-base"
-                >
-                  Edit Content
-                </button>
-                <button
-                  onClick={() => setActiveTab('publish')}
-                  className="px-4 sm:px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm sm:text-base"
-                >
-                  Proceed to Publish
-                </button>
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 sm:gap-8">
+              <div className="xl:col-span-2">
+                <PlatformPreview
+                  platform={generatedContent.platform}
+                  content={generatedContent.content}
+                  userProfile={{
+                    name: user?.profile.name || 'Demo User',
+                    username: user?.username || 'demo_user',
+                    avatar: user?.profile.avatar || 'https://images.pexels.com/photos/614810/pexels-photo-614810.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&fit=crop',
+                    verified: true
+                  }}
+                  engagement={generatedContent.recommendations.engagementPrediction}
+                />
+                
+                <div className="flex flex-col sm:flex-row justify-center space-y-3 sm:space-y-0 sm:space-x-4 mt-6">
+                  <button
+                    onClick={() => setActiveTab('generate')}
+                    className="px-4 sm:px-6 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-sm sm:text-base"
+                  >
+                    Edit Content
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('publish')}
+                    className="px-4 sm:px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm sm:text-base"
+                  >
+                    Proceed to Publish
+                  </button>
+                </div>
+              </div>
+
+              <div className="xl:col-span-1">
+                <PlatformOptimizationPanel
+                  platform={generatedContent.platform}
+                  content={generatedContent.content}
+                  topic={formData.topic}
+                  category="technology"
+                  onHashtagSuggestion={handleHashtagSuggestion}
+                  onCTASuggestion={handleCTASuggestion}
+                />
               </div>
             </div>
           )}

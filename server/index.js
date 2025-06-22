@@ -163,7 +163,46 @@ const fetchTrendsFromApify = async (platform = "twitter") => {
     }
 };
 
-// Helper function to generate content with Gemini AI
+// Platform-specific optimization configurations
+const PLATFORM_CONFIGS = {
+    twitter: {
+        maxCharacters: 280,
+        optimalHashtags: 2,
+        maxHashtags: 5,
+        visualEmphasis: "images_gifs",
+        ctaStyle: "engagement_focused"
+    },
+    linkedin: {
+        maxCharacters: 3000,
+        optimalHashtags: 3,
+        maxHashtags: 10,
+        visualEmphasis: "professional_content",
+        ctaStyle: "professional_networking"
+    },
+    instagram: {
+        maxCharacters: 2200,
+        optimalHashtags: 11,
+        maxHashtags: 30,
+        visualEmphasis: "high_quality_visuals",
+        ctaStyle: "visual_engagement"
+    },
+    facebook: {
+        maxCharacters: 63206,
+        optimalHashtags: 2,
+        maxHashtags: 10,
+        visualEmphasis: "community_content",
+        ctaStyle: "community_building"
+    },
+    tiktok: {
+        maxCharacters: 2200,
+        optimalHashtags: 5,
+        maxHashtags: 20,
+        visualEmphasis: "video_content",
+        ctaStyle: "trend_participation"
+    }
+};
+
+// Enhanced helper function to generate content with platform optimization
 const generateContentWithAI = async (
     topic,
     platform,
@@ -172,8 +211,10 @@ const generateContentWithAI = async (
     includeHashtags
 ) => {
     try {
+        const platformConfig = PLATFORM_CONFIGS[platform] || PLATFORM_CONFIGS.twitter;
+        
         const prompt = `
-You are an expert social media content creator. Generate engaging ${platform} content based on the following requirements:
+You are an expert social media content creator specializing in ${platform}. Generate engaging content optimized specifically for ${platform} based on these requirements:
 
 Topic: ${topic}
 Platform: ${platform}
@@ -181,57 +222,286 @@ Tone: ${tone}
 Target Audience: ${targetAudience || "general audience"}
 Include Hashtags: ${includeHashtags ? "Yes" : "No"}
 
-Generate only the content text, nothing else.
+PLATFORM-SPECIFIC OPTIMIZATION REQUIREMENTS:
+
+Character Limit: Strictly adhere to ${platformConfig.maxCharacters} characters maximum.
+
+${platform === 'twitter' ? `
+- Keep it concise and punchy (under 280 characters)
+- Use 1-2 highly relevant hashtags only
+- Include engaging questions or calls for retweets
+- Consider thread format if more content is needed
+- Suggest visual elements: images, GIFs, or short videos
+` : ''}
+
+${platform === 'linkedin' ? `
+- Professional tone with personal insights (up to 3000 characters)
+- Use 3-5 industry-specific hashtags
+- Include professional experiences or lessons learned
+- Suggest CTAs like "Share your thoughts" or "Connect for more insights"
+- Recommend professional visuals: infographics, team photos, industry charts
+` : ''}
+
+${platform === 'instagram' ? `
+- Visual-first approach (up to 2200 characters)
+- Use 8-15 hashtags strategically (mix trending and niche)
+- Include "Link in bio" CTAs
+- Suggest high-quality visual content requirements
+- Use emojis and line breaks for readability
+- Recommend carousel posts or Reels for engagement
+` : ''}
+
+${platform === 'facebook' ? `
+- Community-focused content (can be longer form)
+- Use 1-3 community or local hashtags
+- Include shareable, valuable content
+- Suggest CTAs like "Share if you agree" or "Join our community"
+- Recommend engaging visuals or Facebook Live content
+` : ''}
+
+${platform === 'tiktok' ? `
+- Video-first content strategy (up to 2200 characters for description)
+- Use 3-7 hashtags including trending challenges
+- Include CTAs like "Duet this" or "Try this challenge"
+- Suggest vertical video concepts (9:16 ratio)
+- Recommend trending sounds and quick hooks
+- Keep video concepts under 60 seconds
+` : ''}
+
+Generate ONLY the optimized content text. Include platform-appropriate CTAs and visual suggestions in the content where natural.
 `;
 
         const result = await model.generateContent(prompt);
         const response = await result.response;
-        const content = response.text();
+        let content = response.text().trim();
+        
+        // Ensure content doesn't exceed platform limits
+        if (content.length > platformConfig.maxCharacters) {
+            content = content.substring(0, platformConfig.maxCharacters - 3) + '...';
+        }
+        
         const viralScore = calculateViralScore(content, platform);
         const hashtagRegex = /#[\w]+/g;
         const hashtags = content.match(hashtagRegex) || [];
 
+        // Generate platform-specific recommendations
+        const recommendations = generatePlatformRecommendations(platform, topic, viralScore);
+
         return {
-            content: content.trim(),
+            content,
             viralScore,
             hashtags,
             platform,
-            recommendations: {
-                bestPostTime: getBestPostTime(platform),
-                expectedReach: Math.floor(Math.random() * 5000) + 1000,
-                engagementPrediction: {
-                    likes: Math.floor(viralScore * 5.2),
-                    retweets: Math.floor(viralScore * 1.8),
-                    comments: Math.floor(viralScore * 0.9),
-                },
-            },
+            recommendations,
+            platformOptimization: {
+                characterCount: content.length,
+                characterLimit: platformConfig.maxCharacters,
+                hashtagCount: hashtags.length,
+                optimalHashtags: platformConfig.optimalHashtags,
+                visualSuggestions: getVisualSuggestions(platform),
+                ctaSuggestions: getCTASuggestions(platform)
+            }
         };
     } catch (error) {
         console.error("Error generating content with Gemini AI:", error);
-        const toneTemplates = { professional: [`Exploring the future of ${topic}.`], casual: [`Just discovered something cool about ${topic}!`], humorous: [`${topic} be like: "I'm about to change your whole career"`]};
-        const templates = toneTemplates[tone] || toneTemplates.professional;
-        const content = templates[Math.floor(Math.random() * templates.length)];
-        const hashtagPool = [`#${topic.replace(/\s+/g, "")}`, "#Innovation", "#TechTrends"];
-        const selectedHashtags = includeHashtags ? hashtagPool.slice(0, 2) : [];
-        const finalContent = includeHashtags ? `${content} ${selectedHashtags.join(" ")}` : content;
-        const viralScore = Math.floor(Math.random() * 30) + 70;
-        return { content: finalContent, viralScore, hashtags: selectedHashtags, platform, recommendations: { bestPostTime: getBestPostTime(platform), expectedReach: Math.floor(Math.random() * 5000) + 1000, engagementPrediction: { likes: Math.floor(viralScore * 5.2), retweets: Math.floor(viralScore * 1.8), comments: Math.floor(viralScore * 0.9) } } };
+        
+        // Enhanced fallback with platform optimization
+        const platformConfig = PLATFORM_CONFIGS[platform] || PLATFORM_CONFIGS.twitter;
+        const fallbackContent = generateFallbackContent(topic, platform, tone, platformConfig);
+        
+        return fallbackContent;
     }
 };
 
-// Helper function to calculate viral score
+// Helper function to generate platform-specific recommendations
+const generatePlatformRecommendations = (platform, topic, viralScore) => {
+    const baseRecommendations = {
+        bestPostTime: getBestPostTime(platform),
+        expectedReach: Math.floor(Math.random() * 5000) + 1000,
+        engagementPrediction: {
+            likes: Math.floor(viralScore * 5.2),
+            retweets: Math.floor(viralScore * 1.8),
+            comments: Math.floor(viralScore * 0.9),
+        }
+    };
+
+    // Add platform-specific recommendations
+    switch (platform) {
+        case 'twitter':
+            return {
+                ...baseRecommendations,
+                threadSuggestion: "Consider creating a thread for more detailed insights",
+                visualTip: "Add an eye-catching image or GIF to increase engagement by 150%"
+            };
+        case 'linkedin':
+            return {
+                ...baseRecommendations,
+                networkingTip: "Tag relevant industry professionals to increase reach",
+                professionalTip: "Share a personal experience to make it more relatable"
+            };
+        case 'instagram':
+            return {
+                ...baseRecommendations,
+                visualTip: "High-quality visuals are essential - consider professional photography",
+                storyTip: "Share behind-the-scenes content in Stories for authenticity"
+            };
+        case 'facebook':
+            return {
+                ...baseRecommendations,
+                communityTip: "Post in relevant Facebook Groups to expand reach",
+                engagementTip: "Ask questions to encourage comments and discussions"
+            };
+        case 'tiktok':
+            return {
+                ...baseRecommendations,
+                videoTip: "Hook viewers in the first 3 seconds with a compelling opening",
+                trendTip: "Use trending sounds to increase discoverability"
+            };
+        default:
+            return baseRecommendations;
+    }
+};
+
+// Helper function to get visual suggestions by platform
+const getVisualSuggestions = (platform) => {
+    const suggestions = {
+        twitter: ["Eye-catching images", "GIFs", "Charts/infographics", "Short videos"],
+        linkedin: ["Professional headshots", "Industry infographics", "Behind-the-scenes", "Carousel posts"],
+        instagram: ["High-quality photos", "Consistent filters", "Carousel posts", "Reels", "Stories"],
+        facebook: ["Engaging images", "User-generated content", "Facebook Live", "Event photos"],
+        tiktok: ["Vertical videos (9:16)", "Trending effects", "Text overlays", "Quick cuts"]
+    };
+    return suggestions[platform] || suggestions.twitter;
+};
+
+// Helper function to get CTA suggestions by platform
+const getCTASuggestions = (platform) => {
+    const ctas = {
+        twitter: ["Retweet if you agree", "What's your take?", "Share your thoughts 👇", "Tag someone who needs this"],
+        linkedin: ["Share your experience", "Connect for more insights", "What's your take on this?", "Follow for updates"],
+        instagram: ["Link in bio", "Double tap if you agree ❤️", "Save for later", "Tag a friend", "Share to Stories"],
+        facebook: ["Share if you agree", "Join our community", "What do you think?", "Like and share"],
+        tiktok: ["Duet this", "Try this challenge", "Follow for more", "Which one are you?", "Comment below"]
+    };
+    return ctas[platform] || ctas.twitter;
+};
+
+// Enhanced fallback content generation
+const generateFallbackContent = (topic, platform, tone, platformConfig) => {
+    const toneTemplates = {
+        professional: [
+            `Exploring the future of ${topic}. Key insights for professionals.`,
+            `${topic} is transforming industries. Here's what leaders need to know.`,
+            `Breaking down ${topic}: Strategic considerations for decision makers.`
+        ],
+        casual: [
+            `Just discovered something cool about ${topic}! 🤔 What do you think?`,
+            `${topic} is everywhere these days! Anyone else fascinated by this?`,
+            `Hot take on ${topic}: It's changing everything and I'm here for it! 🔥`
+        ],
+        humorous: [
+            `${topic} be like: "I'm about to change your whole career" 😅`,
+            `Me trying to explain ${topic} to my friends: *gestures wildly* ✨`,
+            `${topic} really said "hold my beer" to traditional methods 🍺`
+        ]
+    };
+
+    const templates = toneTemplates[tone] || toneTemplates.professional;
+    let content = templates[Math.floor(Math.random() * templates.length)];
+    
+    // Add platform-specific CTA
+    const ctas = getCTASuggestions(platform);
+    const cta = ctas[Math.floor(Math.random() * ctas.length)];
+    content += ` ${cta}`;
+    
+    // Add hashtags based on platform optimization
+    const hashtagPool = [`#${topic.replace(/\s+/g, '')}`, '#Innovation', '#TechTrends', '#DigitalTransformation'];
+    const selectedHashtags = hashtagPool.slice(0, platformConfig.optimalHashtags);
+    content += ` ${selectedHashtags.join(' ')}`;
+    
+    // Ensure content doesn't exceed platform limits
+    if (content.length > platformConfig.maxCharacters) {
+        content = content.substring(0, platformConfig.maxCharacters - 3) + '...';
+    }
+    
+    const viralScore = Math.floor(Math.random() * 30) + 70;
+    
+    return {
+        content,
+        viralScore,
+        hashtags: selectedHashtags,
+        platform,
+        recommendations: generatePlatformRecommendations(platform, topic, viralScore),
+        platformOptimization: {
+            characterCount: content.length,
+            characterLimit: platformConfig.maxCharacters,
+            hashtagCount: selectedHashtags.length,
+            optimalHashtags: platformConfig.optimalHashtags,
+            visualSuggestions: getVisualSuggestions(platform),
+            ctaSuggestions: getCTASuggestions(platform)
+        }
+    };
+};
+
+// Enhanced helper function to calculate viral score with platform-specific factors
 const calculateViralScore = (content, platform) => {
     let score = 50;
-    if (platform === "twitter" && content.length <= 280) score += 10;
-    if (content.includes("?")) score += 5;
-    if (content.match(/[🔥💡🚀✨⭐]/g)) score += 10;
-    if (content.includes("#")) score += 8;
+    const platformConfig = PLATFORM_CONFIGS[platform] || PLATFORM_CONFIGS.twitter;
+    
+    // Length optimization based on platform
+    const contentLength = content.length;
+    const optimalLength = platformConfig.maxCharacters * 0.7; // 70% of max is often optimal
+    
+    if (contentLength <= optimalLength) {
+        score += 10;
+    } else if (contentLength <= platformConfig.maxCharacters) {
+        score += 5;
+    }
+    
+    // Platform-specific scoring
+    switch (platform) {
+        case 'twitter':
+            if (content.includes('?')) score += 8; // Questions perform well
+            if (content.match(/[🔥💡🚀✨⭐]/g)) score += 10; // Popular emojis
+            if (content.match(/\b(thread|🧵)\b/gi)) score += 5; // Thread indicators
+            break;
+        case 'linkedin':
+            if (content.match(/\b(insight|experience|professional|career)\b/gi)) score += 8;
+            if (content.includes('?')) score += 6; // Professional questions
+            if (content.match(/\b(tips|advice|lessons)\b/gi)) score += 10;
+            break;
+        case 'instagram':
+            if (content.match(/[❤️😍🔥✨💯]/g)) score += 12; // Instagram-popular emojis
+            if (content.includes('link in bio')) score += 8;
+            if (content.match(/\b(save|share|tag)\b/gi)) score += 6;
+            break;
+        case 'facebook':
+            if (content.match(/\b(share|community|family|friends)\b/gi)) score += 8;
+            if (content.includes('?')) score += 7; // Questions for engagement
+            break;
+        case 'tiktok':
+            if (content.match(/\b(challenge|trend|viral|fyp)\b/gi)) score += 12;
+            if (content.match(/[🔥💯✨🎵]/g)) score += 10;
+            break;
+    }
+    
+    // General engagement indicators
+    if (content.includes('#')) score += 6;
+    if (content.match(/\b(new|breaking|exclusive|first)\b/gi)) score += 8;
+    if (content.match(/\b(tips|secrets|hacks|tricks)\b/gi)) score += 10;
+    
     return Math.min(score, 100);
 };
 
 // Helper function to get best posting time by platform
 const getBestPostTime = (platform) => {
-    const times = { twitter: "14:00-16:00 UTC", instagram: "11:00-13:00 UTC", linkedin: "08:00-10:00 UTC" };
+    const times = { 
+        twitter: "14:00-16:00 UTC", 
+        linkedin: "08:00-10:00 UTC", 
+        instagram: "11:00-13:00 UTC", 
+        facebook: "13:00-15:00 UTC",
+        tiktok: "18:00-20:00 UTC"
+    };
     return times[platform] || "14:00-16:00 UTC";
 };
 
@@ -273,11 +543,62 @@ app.get("/api/trends", authenticateToken, async (req, res) => {
     res.json(trends.slice(0, parseInt(limit)));
 });
 
-// Content Routes
+// Enhanced Content Routes with platform optimization
 app.post("/api/content/generate", authenticateToken, async (req, res) => {
     const { topic, platform, tone, includeHashtags, targetAudience } = req.body;
     const generatedContent = await generateContentWithAI(topic, platform, tone, targetAudience, includeHashtags);
     res.json(generatedContent);
+});
+
+// New endpoint for platform-specific hashtag suggestions
+app.post("/api/content/hashtags", authenticateToken, (req, res) => {
+    const { topic, platform, category } = req.body;
+    const platformConfig = PLATFORM_CONFIGS[platform] || PLATFORM_CONFIGS.twitter;
+    
+    // Generate hashtags based on topic and platform
+    const baseHashtags = [`#${topic.replace(/\s+/g, '')}`];
+    const platformHashtags = {
+        twitter: ['#trending', '#viral', '#tech', '#innovation'],
+        linkedin: ['#professional', '#career', '#business', '#leadership'],
+        instagram: ['#instagood', '#photooftheday', '#love', '#beautiful'],
+        facebook: ['#community', '#local', '#family', '#friends'],
+        tiktok: ['#fyp', '#foryou', '#viral', '#trending']
+    };
+    
+    const categoryHashtags = {
+        technology: ['#tech', '#innovation', '#AI', '#digital'],
+        business: ['#business', '#entrepreneur', '#startup', '#success'],
+        health: ['#health', '#wellness', '#fitness', '#lifestyle'],
+        entertainment: ['#entertainment', '#fun', '#music', '#movies']
+    };
+    
+    const allHashtags = [
+        ...baseHashtags,
+        ...(platformHashtags[platform] || []),
+        ...(category ? categoryHashtags[category.toLowerCase()] || [] : [])
+    ];
+    
+    const uniqueHashtags = [...new Set(allHashtags)];
+    const suggestedHashtags = uniqueHashtags.slice(0, platformConfig.optimalHashtags);
+    
+    res.json({
+        hashtags: suggestedHashtags,
+        strategy: `Use ${platformConfig.optimalHashtags} hashtags for optimal ${platform} performance`,
+        maxHashtags: platformConfig.maxHashtags
+    });
+});
+
+// New endpoint for platform-specific CTA suggestions
+app.post("/api/content/cta", authenticateToken, (req, res) => {
+    const { platform, topic } = req.body;
+    const ctas = getCTASuggestions(platform);
+    const randomCTA = ctas[Math.floor(Math.random() * ctas.length)];
+    
+    res.json({
+        cta: randomCTA,
+        alternatives: ctas.filter(c => c !== randomCTA).slice(0, 3),
+        platform
+    });
 });
 
 // Posts Routes
