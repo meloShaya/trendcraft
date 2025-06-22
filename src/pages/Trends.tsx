@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { TrendingUp, Search, Filter, Hash, Clock, Users, BarChart3 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -20,6 +21,7 @@ interface Trend {
 
 const Trends: React.FC = () => {
   const { token, logout } = useAuth();
+  const navigate = useNavigate();
   const [trends, setTrends] = useState<Trend[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -78,6 +80,23 @@ const Trends: React.FC = () => {
     if (score >= 80) return 'text-orange-600 bg-orange-100 dark:bg-orange-900/20 dark:text-orange-400';
     if (score >= 70) return 'text-yellow-600 bg-yellow-100 dark:bg-yellow-900/20 dark:text-yellow-400';
     return 'text-green-600 bg-green-100 dark:bg-green-900/20 dark:text-green-400';
+  };
+
+  const handleUseInContent = (trend: Trend) => {
+    // Store the trend data in sessionStorage so it can be accessed by the content generator
+    const trendData = {
+      topic: trend.keyword,
+      category: trend.category,
+      hashtags: trend.relatedHashtags,
+      demographics: trend.demographics,
+      peakTime: trend.peakTime,
+      trendScore: trend.trendScore
+    };
+    
+    sessionStorage.setItem('selectedTrend', JSON.stringify(trendData));
+    
+    // Navigate to the content generator
+    navigate('/generate');
   };
 
   if (loading) {
@@ -209,7 +228,10 @@ const Trends: React.FC = () => {
                   <Users className="h-3 w-3 sm:h-4 sm:w-4 mr-2" />
                   <span className="text-xs sm:text-sm">Age: {trend.demographics.age}</span>
                 </div>
-                <button className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-medium text-xs sm:text-sm">
+                <button 
+                  onClick={() => handleUseInContent(trend)}
+                  className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-medium text-xs sm:text-sm transition-colors hover:bg-blue-50 dark:hover:bg-blue-900/20 px-2 py-1 rounded"
+                >
                   Use in Content
                 </button>
               </div>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Sparkles, Copy, Send, RotateCcw, Zap, Target, Clock, TrendingUp, Settings, Eye } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import PlatformPreview from '../components/PlatformPreview';
@@ -22,6 +22,18 @@ interface GeneratedContent {
   };
 }
 
+interface TrendData {
+  topic: string;
+  category: string;
+  hashtags: string[];
+  demographics: {
+    age: string;
+    interests: string[];
+  };
+  peakTime: string;
+  trendScore: number;
+}
+
 const ContentGenerator: React.FC = () => {
   const { token, user } = useAuth();
   const [activeTab, setActiveTab] = useState<'generate' | 'preview' | 'publish' | 'schedule'>('generate');
@@ -37,6 +49,39 @@ const ContentGenerator: React.FC = () => {
   const [copied, setCopied] = useState(false);
   const [connectedPlatforms, setConnectedPlatforms] = useState<string[]>([]);
   const [isPublishing, setIsPublishing] = useState(false);
+  const [trendNotification, setTrendNotification] = useState<string | null>(null);
+
+  // Check for trend data from sessionStorage on component mount
+  useEffect(() => {
+    const savedTrendData = sessionStorage.getItem('selectedTrend');
+    if (savedTrendData) {
+      try {
+        const trendData: TrendData = JSON.parse(savedTrendData);
+        
+        // Pre-fill the form with trend data
+        setFormData(prev => ({
+          ...prev,
+          topic: trendData.topic,
+          targetAudience: trendData.demographics.interests.join(', ') || prev.targetAudience
+        }));
+
+        // Show notification about the pre-filled trend
+        setTrendNotification(`Content form pre-filled with trending topic: "${trendData.topic}"`);
+        
+        // Clear the trend data from sessionStorage
+        sessionStorage.removeItem('selectedTrend');
+        
+        // Auto-hide notification after 5 seconds
+        setTimeout(() => {
+          setTrendNotification(null);
+        }, 5000);
+        
+      } catch (error) {
+        console.error('Error parsing trend data:', error);
+        sessionStorage.removeItem('selectedTrend');
+      }
+    }
+  }, []);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value, type } = e.target;
@@ -179,6 +224,24 @@ const ContentGenerator: React.FC = () => {
 
   return (
     <div className="max-w-7xl mx-auto space-y-4 sm:space-y-6">
+      {/* Trend Notification */}
+      {trendNotification && (
+        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 flex items-center justify-between">
+          <div className="flex items-center">
+            <TrendingUp className="h-5 w-5 text-blue-600 dark:text-blue-400 mr-3" />
+            <p className="text-blue-800 dark:text-blue-200 text-sm font-medium">
+              {trendNotification}
+            </p>
+          </div>
+          <button
+            onClick={() => setTrendNotification(null)}
+            className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       {/* Header with Tabs */}
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
         <div className="p-3 sm:p-6 border-b border-gray-200 dark:border-gray-700">
