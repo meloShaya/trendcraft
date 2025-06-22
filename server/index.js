@@ -108,10 +108,6 @@ const fetchTrendsFromApify = async (platform = "twitter") => {
     }
 };
 
-// All your other functions and routes remain the same...
-// --- PASTE THE REST OF YOUR HELPER FUNCTIONS AND ROUTES HERE ---
-// (generateContentWithAI, calculateViralScore, authenticateToken, Auth Routes, etc.)
-
 // Helper function to generate content with Gemini AI
 const generateContentWithAI = async (
     topic,
@@ -212,8 +208,7 @@ app.post("/api/auth/login", async (req, res) => {
     res.json({ token, user: { id: user.id, username: user.username, email: user.email, profile: user.profile } });
 });
 
-
-// All other routes...
+// Trends Routes
 app.get("/api/trends", authenticateToken, async (req, res) => {
     const { category, limit = 10, platform = "twitter" } = req.query;
     let trends = await fetchTrendsFromApify(platform);
@@ -223,17 +218,20 @@ app.get("/api/trends", authenticateToken, async (req, res) => {
     res.json(trends.slice(0, parseInt(limit)));
 });
 
+// Content Routes
 app.post("/api/content/generate", authenticateToken, async (req, res) => {
     const { topic, platform, tone, includeHashtags, targetAudience } = req.body;
     const generatedContent = await generateContentWithAI(topic, platform, tone, targetAudience, includeHashtags);
     res.json(generatedContent);
 });
 
+// Posts Routes
 app.get("/api/posts", authenticateToken, (req, res) => {
     const userPosts = posts.filter((p) => p.userId === req.user.id);
     res.json(userPosts.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)));
 });
 
+// Analytics Routes
 app.get("/api/analytics/overview", authenticateToken, (req, res) => {
     const userPosts = posts.filter(p => p.userId === req.user.id);
     const totalEngagement = userPosts.reduce((sum, post) => sum + post.engagement.likes + post.engagement.retweets + post.engagement.comments, 0);
@@ -242,8 +240,27 @@ app.get("/api/analytics/overview", authenticateToken, (req, res) => {
     res.json({ totalPosts: userPosts.length, totalEngagement, totalImpressions, avgViralScore: Math.round(avgViralScore), weeklyGrowth: '+12.5%', topPerformingPost: userPosts.sort((a, b) => b.viralScore - a.viralScore)[0] || null });
 });
 
-// ... and so on for all your routes
-
+// Add missing analytics performance route
+app.get("/api/analytics/performance", authenticateToken, (req, res) => {
+    // Generate mock performance data for the last 30 days
+    const performanceData = [];
+    const today = new Date();
+    
+    for (let i = 29; i >= 0; i--) {
+        const date = new Date(today);
+        date.setDate(date.getDate() - i);
+        
+        performanceData.push({
+            date: date.toISOString().split('T')[0],
+            impressions: Math.floor(Math.random() * 5000) + 1000,
+            engagement: Math.floor(Math.random() * 500) + 100,
+            clicks: Math.floor(Math.random() * 200) + 50,
+            reach: Math.floor(Math.random() * 3000) + 800
+        });
+    }
+    
+    res.json(performanceData);
+});
 
 // The final app.listen call
 app.listen(PORT, () => {

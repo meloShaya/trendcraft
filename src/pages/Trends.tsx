@@ -31,10 +31,25 @@ const Trends: React.FC = () => {
         const response = await fetch(`/api/trends?category=${selectedCategory}`, {
           headers: { Authorization: `Bearer ${token}` }
         });
+        
+        if (!response.ok) {
+          console.error('Failed to fetch trends:', response.status, response.statusText);
+          setTrends([]);
+          return;
+        }
+        
         const data = await response.json();
-        setTrends(data);
+        
+        // Ensure data is an array before setting trends
+        if (Array.isArray(data)) {
+          setTrends(data);
+        } else {
+          console.error('Trends data is not an array:', data);
+          setTrends([]);
+        }
       } catch (error) {
         console.error('Error fetching trends:', error);
+        setTrends([]);
       } finally {
         setLoading(false);
       }
