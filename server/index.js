@@ -115,7 +115,7 @@ const PLATFORM_ACTORS = {
         //     scrapingType: "TREND", // Use TREND scraping type
         //     targetCountry: "United Kingdom",
         //     keyword: "viral", // For search-based trending
-        //     limitResult: 20
+        //     limitResult: 10
         // }
     },
     facebook: {
