@@ -1,603 +1,298 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Mic, MicOff, Volume2, VolumeX, MessageCircle, X, Loader, Zap } from 'lucide-react';
-import { useAuth } from '../contexts/AuthContext';
+import { Mic, Loader, Zap, X } from 'lucide-react';
 
+// --- Configuration ---
+// It's highly recommended to use environment variables for your API key.
+// In your project root, create a .env file: REACT_APP_ELEVENLABS_API_KEY=your_key_here
+// Note: Changed from VITE_ to REACT_APP_ for broader compatibility.
+const ELEVENLABS_API_KEY = process.env.REACT_APP_ELEVENLABS_API_KEY || "YOUR_ELEVENLABS_API_KEY_HERE";
+const VOICE_ID = "rfkTsdZrVWEVhDycUYn9"; // Example: Rachel's voice ID. Replace with your preferred voice.
+
+// --- Interfaces ---
 interface VoiceChatProps {
-  onContentGenerated?: (content: any) => void;
+    onContentGenerated?: (content: any) => void;
+    token: string | null; // Accept the auth token as a prop
 }
 
 interface ConversationMessage {
-  id: string;
-  type: 'user' | 'assistant';
-  text: string;
-  timestamp: Date;
-  isGenerating?: boolean;
+    id: string;
+    type: 'user' | 'assistant';
+    text: string;
 }
 
-const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated }) => {
-  const { token } = useAuth();
-  const [isOpen, setIsOpen] = useState(false);
-  const [isListening, setIsListening] = useState(false);
-  const [isConnected, setIsConnected] = useState(false);
-  const [isSpeaking, setIsSpeaking] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [conversation, setConversation] = useState<ConversationMessage[]>([]);
-  const [connectionError, setConnectionError] = useState<string | null>(null);
-  
-  const wsRef = useRef<WebSocket | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const mediaStreamRef = useRef<MediaStream | null>(null);
-  const processorRef = useRef<ScriptProcessorNode | null>(null);
-  const currentAudioRef = useRef<HTMLAudioElement | null>(null);
-  const recognitionRef = useRef<SpeechRecognition | null>(null);
-
-  // Initialize conversation with welcome message
-  useEffect(() => {
-    if (isOpen && conversation.length === 0) {
-      setConversation([{
-        id: Date.now().toString(),
-        type: 'assistant',
-        text: "Hi! I'm your AI assistant for TrendCraft. You can ask me to generate content like 'Create a witty Twitter post about AI' or 'Give me trending topics for Instagram'. How can I help you today?",
-        timestamp: new Date()
-      }]);
-    }
-  }, [isOpen, conversation.length]);
-
-  const connectToElevenLabs = async () => {
-    try {
-      setConnectionError(null);
-      
-      // Get the API key from environment variable
-      const apiKey = import.meta.env.VITE_ELEVENLABS_API_KEY;
-      
-      if (!apiKey) {
-        setConnectionError('ElevenLabs API key not configured');
-        return;
-      }
-      
-      // Create WebSocket connection with API key as query parameter
-      const wsUrl = `wss://api.elevenlabs.io/v1/convai/conversation?agent_id=bHQjKVMjI7uDAHdIBUYJ&api_key=${apiKey}`;
-      console.log('Connecting to ElevenLabs WebSocket...');
-      
-      const ws = new WebSocket(wsUrl);
-      
-      ws.onopen = () => {
-        console.log('Connected to ElevenLabs');
-        setIsConnected(true);
-        setConnectionError(null);
-      };
-
-      ws.onmessage = async (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          console.log('Received message from ElevenLabs:', data);
-          await handleElevenLabsMessage(data);
-        } catch (error) {
-          console.error('Error parsing WebSocket message:', error);
-        }
-      };
-
-      ws.onerror = (error) => {
-        console.error('WebSocket error:', error);
-        setConnectionError('Failed to connect to voice service. Please check your API key.');
-        setIsConnected(false);
-      };
-
-      ws.onclose = (event) => {
-        console.log('WebSocket connection closed:', event.code, event.reason);
-        setIsConnected(false);
-        setIsListening(false);
-        
-        if (event.code !== 1000) { // Not a normal closure
-          setConnectionError(`Connection closed unexpectedly (${event.code}): ${event.reason || 'Unknown reason'}`);
-        }
-      };
-
-      wsRef.current = ws;
-    } catch (error) {
-      console.error('Error connecting to ElevenLabs:', error);
-      setConnectionError('Failed to initialize voice service');
-    }
-  };
-
-  const handleElevenLabsMessage = async (data: any) => {
-    switch (data.type) {
-      case 'conversation_initiation_metadata':
-        console.log('Conversation initiated');
-        break;
-        
-      case 'audio':
-        // Handle incoming audio from ElevenLabs
-        if (data.audio_event?.audio_base_64) {
-          await playAudioResponse(data.audio_event.audio_base_64);
-        }
-        break;
-        
-      case 'user_transcript':
-        // Handle transcribed user speech
-        if (data.user_transcript?.text) {
-          await handleUserTranscript(data.user_transcript.text);
-        }
-        break;
-        
-      case 'agent_response':
-        // Handle agent text response
-        if (data.agent_response?.text) {
-          addMessage('assistant', data.agent_response.text);
-        }
-        break;
-        
-      case 'error':
-        console.error('ElevenLabs error:', data);
-        setConnectionError(`Voice service error: ${data.message || 'Unknown error'}`);
-        break;
-        
-      default:
-        console.log('Unknown message type:', data.type, data);
-    }
-  };
-
-  const handleUserTranscript = async (transcript: string) => {
-    console.log('User said:', transcript);
+// --- Main Component ---
+const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated, token }) => {
+    const [isOpen, setIsOpen] = useState(false);
+    const [isListening, setIsListening] = useState(false);
+    const [isProcessing, setIsProcessing] = useState(false); // For when your backend is thinking
+    const [conversation, setConversation] = useState<ConversationMessage[]>([]);
     
-    // Add user message to conversation
-    addMessage('user', transcript);
-    
-    // Process the transcript to extract content generation parameters
-    const contentRequest = parseContentRequest(transcript);
-    
-    if (contentRequest) {
-      setIsProcessing(true);
-      
-      try {
-        // Call our backend to generate content
-        const response = await fetch('/api/content/generate', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`
-          },
-          body: JSON.stringify(contentRequest)
+    // Refs for various Web APIs and state
+    const sttSocketRef = useRef<WebSocket | null>(null);
+    const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+    const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
+    const silenceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const finalTranscriptRef = useRef<string>("");
+
+    // Effect to add initial welcome message
+    useEffect(() => {
+        if (isOpen && conversation.length === 0) {
+            setConversation([{
+                id: 'welcome-message',
+                type: 'assistant',
+                text: "Hi! I'm Kai, your creative partner. What should we create today? Try saying 'Draft a witty tweet about space coffee'."
+            }]);
+        }
+    }, [isOpen, conversation.length]);
+
+    // --- Core Logic: Text-to-Speech (TTS) ---
+    const speakText = async (text: string) => {
+        setIsProcessing(true);
+        if (audioPlayerRef.current && !audioPlayerRef.current.paused) {
+            audioPlayerRef.current.pause();
+        }
+
+        const ttsUrl = `https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}`;
+        const headers = {
+            "Accept": "audio/mpeg",
+            "Content-Type": "application/json",
+            "xi-api-key": ELEVENLABS_API_KEY,
+        };
+        const body = JSON.stringify({
+            text: text,
+            model_id: "eleven_turbo_v2",
+            voice_settings: { stability: 0.5, similarity_boost: 0.75 }
         });
 
-        if (response.ok) {
-          const generatedContent = await response.json();
-          
-          // Add generated content to conversation
-          const responseText = `Here's your ${contentRequest.platform} post: "${generatedContent.content}"`;
-          addMessage('assistant', responseText);
-          
-          // Notify parent component
-          if (onContentGenerated) {
-            onContentGenerated(generatedContent);
-          }
-          
-          // Send response back to ElevenLabs for TTS
-          if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-            wsRef.current.send(JSON.stringify({
-              type: 'agent_response',
-              text: responseText
-            }));
-          }
-        } else {
-          const errorText = "I'm sorry, I couldn't generate that content right now. Please try again.";
-          addMessage('assistant', errorText);
-          
-          if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-            wsRef.current.send(JSON.stringify({
-              type: 'agent_response',
-              text: errorText
-            }));
-          }
+        try {
+            const response = await fetch(ttsUrl, { method: 'POST', headers, body });
+            if (!response.ok) throw new Error("TTS request failed");
+
+            const audioBlob = await response.blob();
+            const audioUrl = URL.createObjectURL(audioBlob);
+            
+            const audio = new Audio(audioUrl);
+            audioPlayerRef.current = audio;
+            audio.play();
+            audio.onended = () => setIsProcessing(false);
+
+        } catch (error) {
+            console.error("Error with ElevenLabs TTS:", error);
+            setIsProcessing(false);
         }
-      } catch (error) {
-        console.error('Error generating content:', error);
-        const errorText = "I encountered an error while generating your content. Please try again.";
-        addMessage('assistant', errorText);
-      } finally {
-        setIsProcessing(false);
-      }
-    } else {
-      // Handle general conversation
-      const responseText = "I can help you create social media content! Try saying something like 'Create a funny Twitter post about coffee' or 'Give me trending topics for Instagram'.";
-      addMessage('assistant', responseText);
-      
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({
-          type: 'agent_response',
-          text: responseText
-        }));
-      }
-    }
-  };
-
-  const parseContentRequest = (text: string): any | null => {
-    const lowerText = text.toLowerCase();
-    
-    // Extract platform
-    let platform = 'twitter'; // default
-    if (lowerText.includes('instagram') || lowerText.includes('insta')) platform = 'instagram';
-    else if (lowerText.includes('linkedin')) platform = 'linkedin';
-    else if (lowerText.includes('facebook')) platform = 'facebook';
-    else if (lowerText.includes('tiktok') || lowerText.includes('tik tok')) platform = 'tiktok';
-    
-    // Extract tone
-    let tone = 'professional'; // default
-    if (lowerText.includes('funny') || lowerText.includes('witty') || lowerText.includes('humorous')) tone = 'humorous';
-    else if (lowerText.includes('casual') || lowerText.includes('relaxed')) tone = 'casual';
-    else if (lowerText.includes('inspiring') || lowerText.includes('motivational')) tone = 'inspirational';
-    
-    // Extract topic - look for content generation keywords
-    const contentKeywords = ['post about', 'content about', 'tweet about', 'create', 'generate', 'write'];
-    let topic = '';
-    
-    for (const keyword of contentKeywords) {
-      const index = lowerText.indexOf(keyword);
-      if (index !== -1) {
-        // Extract everything after the keyword
-        const afterKeyword = text.substring(index + keyword.length).trim();
-        // Remove common ending words
-        topic = afterKeyword.replace(/\b(please|thanks|thank you)\b/gi, '').trim();
-        break;
-      }
-    }
-    
-    // If we found a topic and it seems like a content request, return the parameters
-    if (topic && (lowerText.includes('post') || lowerText.includes('content') || lowerText.includes('create') || lowerText.includes('generate'))) {
-      return {
-        topic,
-        platform,
-        tone,
-        includeHashtags: true,
-        targetAudience: ''
-      };
-    }
-    
-    return null;
-  };
-
-  const addMessage = (type: 'user' | 'assistant', text: string) => {
-    const message: ConversationMessage = {
-      id: Date.now().toString(),
-      type,
-      text,
-      timestamp: new Date()
     };
-    
-    setConversation(prev => [...prev, message]);
-  };
 
-  const playAudioResponse = async (audioBase64: string) => {
-    try {
-      setIsSpeaking(true);
-      
-      // Convert base64 to audio blob
-      const audioData = atob(audioBase64);
-      const arrayBuffer = new ArrayBuffer(audioData.length);
-      const uint8Array = new Uint8Array(arrayBuffer);
-      
-      for (let i = 0; i < audioData.length; i++) {
-        uint8Array[i] = audioData.charCodeAt(i);
-      }
-      
-      const audioBlob = new Blob([arrayBuffer], { type: 'audio/mpeg' });
-      const audioUrl = URL.createObjectURL(audioBlob);
-      
-      const audio = new Audio(audioUrl);
-      currentAudioRef.current = audio;
-      
-      audio.onended = () => {
-        setIsSpeaking(false);
-        URL.revokeObjectURL(audioUrl);
-        currentAudioRef.current = null;
-      };
-      
-      await audio.play();
-    } catch (error) {
-      console.error('Error playing audio:', error);
-      setIsSpeaking(false);
-    }
-  };
-
-  // Fallback to Web Speech API if ElevenLabs WebSocket fails
-  const initializeSpeechRecognition = () => {
-    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-      const recognition = new SpeechRecognition();
-      
-      recognition.continuous = true;
-      recognition.interimResults = true;
-      recognition.lang = 'en-US';
-      
-      recognition.onstart = () => {
-        console.log('Speech recognition started');
-        setIsListening(true);
-      };
-      
-      recognition.onresult = (event) => {
-        const transcript = Array.from(event.results)
-          .map(result => result[0])
-          .map(result => result.transcript)
-          .join('');
-          
-        if (event.results[event.results.length - 1].isFinal) {
-          console.log('Final transcript:', transcript);
-          handleUserTranscript(transcript);
+    // --- Core Logic: Process User's Request ---
+    const processUserRequest = async (transcript: string) => {
+        if (!transcript || !token) {
+            if(!token) console.error("Authentication token is missing.");
+            return;
         }
-      };
-      
-      recognition.onerror = (event) => {
-        console.error('Speech recognition error:', event.error);
-        setIsListening(false);
-      };
-      
-      recognition.onend = () => {
-        console.log('Speech recognition ended');
-        setIsListening(false);
-      };
-      
-      recognitionRef.current = recognition;
-      return true;
-    }
-    return false;
-  };
-
-  const startListening = async () => {
-    try {
-      if (!isConnected) {
-        // Try to connect to ElevenLabs first
-        await connectToElevenLabs();
         
-        // If still not connected after a short delay, fall back to Web Speech API
-        setTimeout(() => {
-          if (!isConnected) {
-            console.log('Falling back to Web Speech API');
-            if (initializeSpeechRecognition() && recognitionRef.current) {
-              recognitionRef.current.start();
-            } else {
-              setConnectionError('Speech recognition not supported in this browser');
+        setIsProcessing(true);
+        addMessage('user', transcript);
+
+        try {
+            const response = await fetch('/api/content/generate', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify(parseContentRequest(transcript))
+            });
+
+            if (!response.ok) throw new Error("Backend request failed");
+            
+            const generatedContent = await response.json();
+            
+            const verbalResponse = `Sure, here's a draft for ${generatedContent.platform}: ${generatedContent.content}`;
+            addMessage('assistant', verbalResponse);
+            await speakText(verbalResponse);
+            
+            if (onContentGenerated) {
+                onContentGenerated(generatedContent);
             }
-          }
-        }, 2000);
-        return;
-      }
-      
-      // If connected to ElevenLabs, use their audio streaming
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaStreamRef.current = stream;
-      
-      const audioContext = new AudioContext();
-      audioContextRef.current = audioContext;
-      
-      const source = audioContext.createMediaStreamSource(stream);
-      const processor = audioContext.createScriptProcessor(4096, 1, 1);
-      processorRef.current = processor;
-      
-      processor.onaudioprocess = (event) => {
-        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-          const inputData = event.inputBuffer.getChannelData(0);
-          const pcm16 = new Int16Array(inputData.length);
-          
-          for (let i = 0; i < inputData.length; i++) {
-            pcm16[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
-          }
-          
-          // Send audio data to ElevenLabs
-          wsRef.current.send(JSON.stringify({
-            type: 'audio',
-            audio_data: Array.from(pcm16)
-          }));
+
+        } catch (error) {
+            console.error("Error processing user request:", error);
+            const errorResponse = "I'm sorry, I hit a snag trying to generate that. Could you try rephrasing?";
+            addMessage('assistant', errorResponse);
+            await speakText(errorResponse);
+        } finally {
+            setIsProcessing(false);
         }
-      };
-      
-      source.connect(processor);
-      processor.connect(audioContext.destination);
-      
-      setIsListening(true);
-    } catch (error) {
-      console.error('Error starting audio capture:', error);
-      setConnectionError('Failed to access microphone');
-    }
-  };
-
-  const stopListening = () => {
-    setIsListening(false);
-    
-    // Stop Web Speech API if being used
-    if (recognitionRef.current) {
-      recognitionRef.current.stop();
-    }
-    
-    // Stop audio streaming
-    if (mediaStreamRef.current) {
-      mediaStreamRef.current.getTracks().forEach(track => track.stop());
-      mediaStreamRef.current = null;
-    }
-    
-    if (processorRef.current) {
-      processorRef.current.disconnect();
-      processorRef.current = null;
-    }
-    
-    if (audioContextRef.current) {
-      audioContextRef.current.close();
-      audioContextRef.current = null;
-    }
-  };
-
-  const toggleListening = () => {
-    if (isListening) {
-      stopListening();
-    } else {
-      startListening();
-    }
-  };
-
-  const stopSpeaking = () => {
-    if (currentAudioRef.current) {
-      currentAudioRef.current.pause();
-      currentAudioRef.current = null;
-      setIsSpeaking(false);
-    }
-  };
-
-  const closeChat = () => {
-    setIsOpen(false);
-    stopListening();
-    stopSpeaking();
-    
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
-    
-    setIsConnected(false);
-    setConversation([]);
-    setConnectionError(null);
-  };
-
-  // Auto-connect when chat opens
-  useEffect(() => {
-    if (isOpen && !isConnected && !wsRef.current) {
-      connectToElevenLabs();
-    }
-  }, [isOpen]);
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      closeChat();
     };
-  }, []);
 
-  return (
-    <>
-      {/* Floating Microphone Button */}
-      {!isOpen && (
-        <button
-          onClick={() => setIsOpen(true)}
-          className="fixed bottom-6 right-6 z-50 w-14 h-14 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-full shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-110 flex items-center justify-center group"
-          title="Voice Assistant"
-        >
-          <Mic className="h-6 w-6 group-hover:scale-110 transition-transform" />
-          <div className="absolute -top-2 -right-2 w-4 h-4 bg-green-500 rounded-full animate-pulse"></div>
-        </button>
-      )}
+    // --- Core Logic: Speech-to-Text (STT) via WebSocket ---
+    const startListening = async () => {
+        if (isListening) return;
 
-      {/* Voice Chat Interface */}
-      {isOpen && (
-        <div className="fixed bottom-6 right-6 z-50 w-96 h-[500px] bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 flex flex-col overflow-hidden">
-          {/* Header */}
-          <div className="bg-gradient-to-r from-blue-600 to-purple-600 text-white p-4 flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <div className="w-8 h-8 bg-white/20 rounded-full flex items-center justify-center">
-                <Zap className="h-4 w-4" />
-              </div>
-              <div>
-                <h3 className="font-semibold">Voice Assistant</h3>
-                <p className="text-xs opacity-90">
-                  {isConnected ? 'Connected' : connectionError ? 'Connection Failed' : 'Connecting...'}
-                </p>
-              </div>
-            </div>
-            <button
-              onClick={closeChat}
-              className="p-1 hover:bg-white/20 rounded-lg transition-colors"
-            >
-              <X className="h-5 w-5" />
-            </button>
-          </div>
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaRecorderRef.current = new MediaRecorder(stream);
+            
+            const sttSocket = new WebSocket(`wss://api.elevenlabs.io/v1/speech-to-text/stream?model_id=eleven_multilingual_v2&api_key=${ELEVENLABS_API_KEY}`);
+            sttSocketRef.current = sttSocket;
+            
+            sttSocket.onopen = () => {
+                console.log("STT WebSocket opened. Starting media recorder.");
+                setIsListening(true);
+                finalTranscriptRef.current = "";
+                mediaRecorderRef.current?.start(500);
+            };
 
-          {/* Connection Error */}
-          {connectionError && (
-            <div className="bg-red-50 dark:bg-red-900/20 border-l-4 border-red-500 p-3">
-              <p className="text-red-700 dark:text-red-300 text-sm">{connectionError}</p>
-              <button
-                onClick={() => {
-                  setConnectionError(null);
-                  connectToElevenLabs();
-                }}
-                className="text-red-600 dark:text-red-400 text-xs underline mt-1"
-              >
-                Try again
-              </button>
-            </div>
-          )}
+            mediaRecorderRef.current.ondataavailable = (event) => {
+                if (event.data.size > 0 && sttSocket.readyState === WebSocket.OPEN) {
+                    sttSocket.send(event.data);
+                    resetSilenceTimeout();
+                }
+            };
+            
+            sttSocket.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                if (data.transcript) {
+                    finalTranscriptRef.current += data.transcript;
+                }
+                if (data.is_final) {
+                    stopListening();
+                }
+            };
 
-          {/* Conversation */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            {conversation.map((message) => (
-              <div
-                key={message.id}
-                className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
-              >
-                <div
-                  className={`max-w-[80%] p-3 rounded-2xl ${
-                    message.type === 'user'
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white'
-                  }`}
+            sttSocket.onclose = () => {
+                console.log("STT WebSocket closed.");
+                if (mediaRecorderRef.current?.state === 'recording') {
+                    mediaRecorderRef.current.stop();
+                }
+                stream.getTracks().forEach(track => track.stop());
+                setIsListening(false);
+                if(finalTranscriptRef.current) {
+                    processUserRequest(finalTranscriptRef.current);
+                }
+            };
+
+            sttSocket.onerror = (error) => {
+                console.error("STT WebSocket error:", error);
+                setIsListening(false);
+            };
+            
+        } catch (error) {
+            console.error("Failed to start listening:", error);
+        }
+    };
+
+    const stopListening = () => {
+        if (!isListening) return;
+        
+        if (sttSocketRef.current?.readyState === WebSocket.OPEN) {
+            sttSocketRef.current.close();
+        }
+        
+        if (mediaRecorderRef.current?.state === "recording") {
+            mediaRecorderRef.current.stop();
+        }
+
+        clearTimeout(silenceTimeoutRef.current as NodeJS.Timeout);
+        setIsListening(false);
+    };
+
+    const resetSilenceTimeout = () => {
+        if (silenceTimeoutRef.current) {
+            clearTimeout(silenceTimeoutRef.current);
+        }
+        silenceTimeoutRef.current = setTimeout(() => {
+            stopListening();
+        }, 2000); // Stop after 2 seconds of silence
+    };
+
+    const addMessage = (type: 'user' | 'assistant', text: string) => {
+        setConversation(prev => [...prev, { id: Date.now().toString(), type, text }]);
+    };
+    
+    const parseContentRequest = (text: string) => {
+        const lowerText = text.toLowerCase();
+        let platform = 'twitter';
+        if (lowerText.includes('instagram')) platform = 'instagram';
+        if (lowerText.includes('linkedin')) platform = 'linkedin';
+
+        let tone = 'professional';
+        if (lowerText.includes('witty') || lowerText.includes('funny')) tone = 'humorous';
+        if (lowerText.includes('casual')) tone = 'casual';
+        
+        const keywords = ['about', 'on the topic of', 'regarding'];
+        let topic = '';
+        for (const keyword of keywords) {
+            if (lowerText.includes(keyword)) {
+                topic = text.substring(lowerText.indexOf(keyword) + keyword.length).trim();
+                break;
+            }
+        }
+        
+        if (!topic) {
+            const words = text.split(" ");
+            topic = words.slice(Math.max(words.length - 5, 1)).join(" ");
+        }
+
+        return { topic, platform, tone, includeHashtags: true };
+    };
+
+    return (
+        <>
+            {!isOpen && (
+                <button
+                    onClick={() => setIsOpen(true)}
+                    className="fixed bottom-6 right-6 z-50 w-14 h-14 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-full shadow-lg flex items-center justify-center group"
                 >
-                  <p className="text-sm leading-relaxed">{message.text}</p>
-                  <p className="text-xs opacity-70 mt-1">
-                    {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </p>
-                </div>
-              </div>
-            ))}
-            
-            {isProcessing && (
-              <div className="flex justify-start">
-                <div className="bg-gray-100 dark:bg-gray-700 p-3 rounded-2xl">
-                  <div className="flex items-center space-x-2">
-                    <Loader className="h-4 w-4 animate-spin text-blue-600" />
-                    <p className="text-sm text-gray-600 dark:text-gray-400">Generating content...</p>
-                  </div>
-                </div>
-              </div>
+                    <Mic className="h-6 w-6" />
+                </button>
             )}
-          </div>
 
-          {/* Controls */}
-          <div className="border-t border-gray-200 dark:border-gray-700 p-4">
-            <div className="flex items-center justify-center space-x-4">
-              <button
-                onClick={toggleListening}
-                disabled={!isConnected && !recognitionRef.current}
-                className={`w-12 h-12 rounded-full flex items-center justify-center transition-all ${
-                  isListening
-                    ? 'bg-red-500 hover:bg-red-600 text-white animate-pulse'
-                    : 'bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 disabled:cursor-not-allowed'
-                }`}
-                title={isListening ? 'Stop listening' : 'Start listening'}
-              >
-                {isListening ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
-              </button>
-              
-              <button
-                onClick={stopSpeaking}
-                disabled={!isSpeaking}
-                className={`w-12 h-12 rounded-full flex items-center justify-center transition-all ${
-                  isSpeaking
-                    ? 'bg-orange-500 hover:bg-orange-600 text-white'
-                    : 'bg-gray-300 dark:bg-gray-600 text-gray-500 dark:text-gray-400'
-                }`}
-                title="Stop speaking"
-              >
-                {isSpeaking ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
-              </button>
-            </div>
-            
-            <div className="text-center mt-3">
-              <p className="text-xs text-gray-500 dark:text-gray-400">
-                {isListening ? 'Listening...' : isSpeaking ? 'Speaking...' : isConnected ? 'Click mic to start' : 'Connecting...'}
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-    </>
-  );
+            {isOpen && (
+                <div className="fixed bottom-6 right-6 z-50 w-96 h-[500px] bg-white dark:bg-gray-800 rounded-2xl shadow-2xl flex flex-col">
+                    <div className="bg-gradient-to-r from-blue-600 to-purple-600 text-white p-4 flex items-center justify-between">
+                         <div className="flex items-center space-x-3">
+                            <Zap className="h-5 w-5" />
+                            <h3 className="font-semibold">Kai, your AI Partner</h3>
+                         </div>
+                        <button onClick={() => setIsOpen(false)} className="p-1 hover:bg-white/20 rounded-lg">
+                            <X className="h-5 w-5" />
+                        </button>
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                        {conversation.map((msg) => (
+                            <div key={msg.id} className={`flex ${msg.type === 'user' ? 'justify-end' : 'justify-start'}`}>
+                                <div className={`max-w-[80%] p-3 rounded-2xl text-sm ${msg.type === 'user' ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white'}`}>
+                                    {msg.text}
+                                </div>
+                            </div>
+                        ))}
+                         {isProcessing && (
+                            <div className="flex justify-start">
+                                <div className="bg-gray-100 dark:bg-gray-700 p-3 rounded-2xl">
+                                    <Loader className="h-4 w-4 animate-spin text-blue-600" />
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="border-t border-gray-200 dark:border-gray-700 p-4 text-center">
+                        <button
+                            onClick={isListening ? stopListening : startListening}
+                            className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto transition-all ${
+                                isListening ? 'bg-red-500 text-white animate-pulse' : 'bg-blue-600 text-white'
+                            }`}
+                        >
+                            <Mic className="h-7 w-7" />
+                        </button>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                           {isListening ? "Listening... Click to stop" : "Click mic to speak"}
+                        </p>
+                    </div>
+                </div>
+            )}
+        </>
+    );
 };
 
 export default VoiceChat;
