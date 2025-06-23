@@ -9,6 +9,7 @@ const VOICE_ID = "rfkTsdZrVWEVhDycUYn9"; // Example: Tessa's voice ID.
 // --- Interfaces ---
 interface VoiceChatProps {
     onContentGenerated?: (content: any) => void;
+    token: string | null; // This component now requires the token to be passed in
 }
 
 interface ConversationMessage {
