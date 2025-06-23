@@ -265,12 +265,15 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated }) => {
                 clearTimeout(connectionTimeoutRef.current);
             }
             
-            // Use the correct WebSocket URL that matches the server route
+            // in VoiceChat.tsx, inside startListening()
             const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-            const wsUrl = `${protocol}//${window.location.host}/api/voice/stream`;
+            let host = window.location.host;
             
-            console.log('Connecting to WebSocket:', wsUrl);
+            // if you detect the StackBlitz pattern, swap in port 3001:
+            host = host.replace(/--\d+--/, '--3001--');
             
+            const wsUrl = `${protocol}//${host}/api/voice/stream`;
+            console.log('🛰️ Connecting STT websocket to:', wsUrl);
             const sttSocket = new WebSocket(wsUrl);
             sttSocketRef.current = sttSocket;
 
