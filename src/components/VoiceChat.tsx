@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Mic, MicOff, Volume2, VolumeX, Loader, Zap, X, AlertCircle, Wifi, WifiOff } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
 
 // --- Configuration ---
 const ELEVENLABS_API_KEY = import.meta.env.VITE_ELEVENLABS_API_KEY;
@@ -8,7 +9,6 @@ const VOICE_ID = "rfkTsdZrVWEVhDycUYn9"; // Example: Tessa's voice ID.
 // --- Interfaces ---
 interface VoiceChatProps {
     onContentGenerated?: (content: any) => void;
-    token: string | null;
 }
 
 interface ConversationMessage {
@@ -19,7 +19,8 @@ interface ConversationMessage {
 }
 
 // --- Main Component ---
-const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated, token }) => {
+const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated }) => {
+    const { token } = useAuth(); // Get token from auth context
     const [isOpen, setIsOpen] = useState(false);
     const [isListening, setIsListening] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
@@ -38,6 +39,7 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated, token }) => {
     const silenceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const finalTranscriptRef = useRef<string>("");
     const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const streamRef = useRef<MediaStream | null>(null);
 
     const isApiConfigured = ELEVENLABS_API_KEY && ELEVENLABS_API_KEY !== "YOUR_ELEVENLABS_API_KEY_HERE";
     const maxReconnectAttempts = 3;
@@ -51,20 +53,36 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated, token }) => {
     // Cleanup on unmount
     useEffect(() => {
         return () => {
-            if (sttSocketRef.current) {
-                sttSocketRef.current.close();
-            }
-            if (audioPlayerRef.current) {
-                audioPlayerRef.current.pause();
-            }
-            if (reconnectTimeoutRef.current) {
-                clearTimeout(reconnectTimeoutRef.current);
-            }
-            if (silenceTimeoutRef.current) {
-                clearTimeout(silenceTimeoutRef.current);
-            }
+            cleanup();
         };
     }, []);
+
+    const cleanup = () => {
+        if (sttSocketRef.current) {
+            sttSocketRef.current.close();
+            sttSocketRef.current = null;
+        }
+        if (audioPlayerRef.current) {
+            audioPlayerRef.current.pause();
+            audioPlayerRef.current = null;
+        }
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+            mediaRecorderRef.current.stop();
+            mediaRecorderRef.current = null;
+        }
+        if (streamRef.current) {
+            streamRef.current.getTracks().forEach(track => track.stop());
+            streamRef.current = null;
+        }
+        if (reconnectTimeoutRef.current) {
+            clearTimeout(reconnectTimeoutRef.current);
+            reconnectTimeoutRef.current = null;
+        }
+        if (silenceTimeoutRef.current) {
+            clearTimeout(silenceTimeoutRef.current);
+            silenceTimeoutRef.current = null;
+        }
+    };
 
     const addMessage = (type: ConversationMessage['type'], text: string) => {
         setConversation(prev => [...prev, { 
@@ -117,6 +135,7 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated, token }) => {
                 setIsSpeaking(false);
                 setProcessingStatus('');
                 addMessage('error', "Audio playback failed.");
+                URL.revokeObjectURL(audioUrl);
             };
         } catch (error) {
             console.error("Error with TTS:", error);
@@ -127,7 +146,10 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated, token }) => {
     };
     
     const processUserRequest = async (transcript: string) => {
-        if (!transcript || !token) return;
+        if (!transcript || !token) {
+            addMessage('error', 'Authentication required. Please log in.');
+            return;
+        }
         
         setIsProcessing(true);
         setProcessingStatus('Processing your request...');
@@ -136,11 +158,16 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated, token }) => {
         try {
             const response = await fetch('/api/content/generate', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                headers: { 
+                    'Content-Type': 'application/json', 
+                    'Authorization': `Bearer ${token}` 
+                },
                 body: JSON.stringify(parseContentRequest(transcript))
             });
             
-            if (!response.ok) throw new Error("Backend request failed");
+            if (!response.ok) {
+                throw new Error(`Backend request failed: ${response.status}`);
+            }
             
             const generatedContent = await response.json();
             const verbalResponse = `Sure, here's a draft for ${generatedContent.platform}: ${generatedContent.content}`;
@@ -177,22 +204,48 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated, token }) => {
         setConnectionStatus('connecting');
         addMessage('system', `Reconnecting... (Attempt ${reconnectAttempts + 1}/${maxReconnectAttempts})`);
 
+        const delay = Math.min(2000 * Math.pow(2, reconnectAttempts), 10000); // Exponential backoff with max 10s
         reconnectTimeoutRef.current = setTimeout(() => {
             startListening();
-        }, 2000 * reconnectAttempts); // Exponential backoff
+        }, delay);
     };
     
     const startListening = async () => {
-        if (isListening) return;
+        if (isListening || !token) {
+            if (!token) {
+                addMessage('error', 'Please log in to use voice features.');
+            }
+            return;
+        }
         
         try {
             setConnectionStatus('connecting');
             setProcessingStatus('Requesting microphone access...');
             
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            mediaRecorderRef.current = new MediaRecorder(stream);
+            // Check if we already have a stream
+            if (streamRef.current) {
+                streamRef.current.getTracks().forEach(track => track.stop());
+            }
+            
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true
+                }
+            });
+            streamRef.current = stream;
+            
+            mediaRecorderRef.current = new MediaRecorder(stream, {
+                mimeType: 'audio/webm;codecs=opus'
+            });
             
             setProcessingStatus('Connecting to voice service...');
+            
+            // Close existing connection if any
+            if (sttSocketRef.current) {
+                sttSocketRef.current.close();
+            }
             
             const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
             const localWsUrl = `${protocol}//${window.location.host}/api/voice/stream`;
@@ -208,7 +261,10 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated, token }) => {
                 setReconnectAttempts(0);
                 setProcessingStatus('Listening...');
                 finalTranscriptRef.current = "";
-                mediaRecorderRef.current?.start(500);
+                
+                if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'inactive') {
+                    mediaRecorderRef.current.start(250); // Send data every 250ms
+                }
             };
 
             mediaRecorderRef.current.ondataavailable = (event) => {
@@ -219,14 +275,18 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated, token }) => {
             };
             
             sttSocket.onmessage = (event) => {
-                const data = JSON.parse(event.data);
-                if (data.transcript) {
-                    finalTranscriptRef.current += data.transcript;
-                    setProcessingStatus('Processing speech...');
-                }
-                if (data.is_final) {
-                    setProcessingStatus('Finalizing...');
-                    stopListening();
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.transcript) {
+                        finalTranscriptRef.current += data.transcript;
+                        setProcessingStatus('Processing speech...');
+                    }
+                    if (data.is_final) {
+                        setProcessingStatus('Finalizing...');
+                        stopListening();
+                    }
+                } catch (error) {
+                    console.error('Error parsing WebSocket message:', error);
                 }
             };
 
@@ -236,12 +296,16 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated, token }) => {
                 setIsConnected(false);
                 setProcessingStatus('');
                 
-                if (mediaRecorderRef.current?.state === 'recording') {
+                if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
                     mediaRecorderRef.current.stop();
                 }
-                stream.getTracks().forEach(track => track.stop());
                 
-                if (event.code !== 1000 && event.code !== 1001) {
+                if (streamRef.current) {
+                    streamRef.current.getTracks().forEach(track => track.stop());
+                }
+                
+                // Only attempt reconnection for unexpected closures
+                if (event.code !== 1000 && event.code !== 1001 && reconnectAttempts < maxReconnectAttempts) {
                     setConnectionStatus('error');
                     addMessage('error', `Voice connection lost (${event.code}). Attempting to reconnect...`);
                     attemptReconnection();
@@ -260,13 +324,37 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated, token }) => {
                 setIsConnected(false);
                 setProcessingStatus('');
                 addMessage('error', 'Could not establish a voice connection to the server.');
-                attemptReconnection();
+                
+                if (reconnectAttempts < maxReconnectAttempts) {
+                    attemptReconnection();
+                }
             };
+
+            // Set a timeout for connection
+            setTimeout(() => {
+                if (connectionStatus === 'connecting') {
+                    addMessage('error', 'Connection timeout. Please try again.');
+                    setConnectionStatus('error');
+                    sttSocket.close();
+                }
+            }, 10000); // 10 second timeout
+
         } catch (error) {
             console.error("Failed to start listening:", error);
             setConnectionStatus('error');
             setProcessingStatus('');
-            addMessage('error', 'Could not access the microphone. Please check permissions.');
+            
+            if (error instanceof Error) {
+                if (error.name === 'NotAllowedError') {
+                    addMessage('error', 'Microphone access denied. Please allow microphone permissions and try again.');
+                } else if (error.name === 'NotFoundError') {
+                    addMessage('error', 'No microphone found. Please connect a microphone and try again.');
+                } else {
+                    addMessage('error', `Microphone error: ${error.message}`);
+                }
+            } else {
+                addMessage('error', 'Could not access the microphone. Please check permissions.');
+            }
         }
     };
 
@@ -280,6 +368,9 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated, token }) => {
         }
         if (mediaRecorderRef.current?.state === "recording") {
             mediaRecorderRef.current.stop();
+        }
+        if (streamRef.current) {
+            streamRef.current.getTracks().forEach(track => track.stop());
         }
         clearTimeout(silenceTimeoutRef.current as NodeJS.Timeout);
         setIsListening(false);
@@ -297,7 +388,11 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated, token }) => {
 
     const resetSilenceTimeout = () => {
         if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
-        silenceTimeoutRef.current = setTimeout(stopListening, 3000);
+        silenceTimeoutRef.current = setTimeout(() => {
+            if (isListening) {
+                stopListening();
+            }
+        }, 4000); // 4 seconds of silence
     };
 
     const parseContentRequest = (text: string) => {
@@ -335,10 +430,10 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated, token }) => {
 
     const getConnectionStatusColor = () => {
         switch (connectionStatus) {
-            case 'connected': return 'text-green-500';
-            case 'connecting': return 'text-yellow-500';
-            case 'error': return 'text-red-500';
-            default: return 'text-gray-500';
+            case 'connected': return 'text-green-400';
+            case 'connecting': return 'text-yellow-400';
+            case 'error': return 'text-red-400';
+            default: return 'text-gray-400';
         }
     };
 
@@ -350,6 +445,11 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated, token }) => {
             default: return <WifiOff className="h-3 w-3" />;
         }
     };
+
+    // Don't render if no token
+    if (!token) {
+        return null;
+    }
 
     return (
         <>
@@ -393,7 +493,10 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated, token }) => {
                                 {isMuted ? <VolumeX className="h-3 w-3 sm:h-4 sm:w-4" /> : <Volume2 className="h-3 w-3 sm:h-4 sm:w-4" />}
                             </button>
                             <button 
-                                onClick={() => setIsOpen(false)} 
+                                onClick={() => {
+                                    setIsOpen(false);
+                                    cleanup();
+                                }} 
                                 className="p-1.5 sm:p-2 hover:bg-white/20 rounded-lg transition-colors"
                             >
                                 <X className="h-3 w-3 sm:h-4 sm:w-4" />
@@ -460,14 +563,14 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated, token }) => {
                         <div className="flex items-center justify-center space-x-3 sm:space-x-4 mb-2 sm:mb-3">
                             <button
                                 onClick={isListening ? stopListening : startListening}
-                                disabled={connectionStatus === 'connecting'}
+                                disabled={connectionStatus === 'connecting' || isProcessing}
                                 className={`w-12 h-12 sm:w-16 sm:h-16 rounded-full flex items-center justify-center mx-auto transition-all duration-300 ${
                                     isListening 
                                         ? 'bg-red-500 text-white animate-pulse hover:bg-red-600' 
                                         : 'bg-blue-600 text-white hover:bg-blue-700 hover:scale-105'
                                 } disabled:opacity-50 disabled:cursor-not-allowed`}
                             >
-                                {connectionStatus === 'connecting' ? (
+                                {connectionStatus === 'connecting' || isProcessing ? (
                                     <Loader className="h-5 w-5 sm:h-7 sm:w-7 animate-spin" />
                                 ) : isListening ? (
                                     <MicOff className="h-5 w-5 sm:h-7 sm:w-7" />
@@ -492,7 +595,9 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated, token }) => {
                                 ? "Listening... Click to stop" 
                                 : connectionStatus === 'connecting'
                                     ? "Connecting..."
-                                    : "Click mic to speak"
+                                    : isProcessing
+                                        ? "Processing..."
+                                        : "Click mic to speak"
                             }
                         </p>
                         

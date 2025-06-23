@@ -35,7 +35,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
         </main>
       </div>
       
-      {/* Voice Chat Component */}
+      {/* Voice Chat Component - now gets token from useAuth hook internally */}
       <VoiceChat onContentGenerated={handleContentGenerated} />
     </div>
   );
