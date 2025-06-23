@@ -45,6 +45,57 @@ app.use(
 );
 app.use(express.json());
 
+/ --- START OF FIX: WebSocket Proxy Route ---
+// This new route will handle the WebSocket connection from your React client
+app.ws('/api/voice/stream', (ws, req) => {
+    console.log('Client connected to server WebSocket');
+
+    // 1. When the client connects to YOUR server, you create a NEW connection to ElevenLabs
+    const elevenLabsSocket = new WebSocket(`wss://api.elevenlabs.io/v1/speech-to-text/stream?model_id=eleven_multilingual_v2&api_key=${process.env.ELEVENLABS_API_KEY}`);
+
+    // 2. When ElevenLabs opens the connection, start listening for messages from them
+    elevenLabsSocket.onopen = () => {
+        console.log('Server successfully connected to ElevenLabs WebSocket');
+    };
+
+    // 3. When your client sends audio data to your server...
+    ws.onmessage = (msg) => {
+        // ...forward that audio data directly to ElevenLabs.
+        if (elevenLabsSocket.readyState === WebSocket.OPEN) {
+            elevenLabsSocket.send(msg.data);
+        }
+    };
+
+    // 4. When ElevenLabs sends a message (like a transcript) back to your server...
+    elevenLabsSocket.onmessage = (event) => {
+        // ...forward that message directly back to your client.
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(event.data);
+        }
+    };
+
+    // 5. Handle errors and closes by cleaning up both connections
+    elevenLabsSocket.onerror = (error) => {
+        console.error('ElevenLabs WebSocket error:', error);
+        ws.close(1011, "Error connecting to voice service");
+    };
+
+    elevenLabsSocket.onclose = (event) => {
+        console.log('ElevenLabs WebSocket closed:', event.code, event.reason);
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.close(event.code, event.reason);
+        }
+    };
+    
+    ws.onclose = () => {
+        console.log('Client disconnected from server WebSocket');
+        if (elevenLabsSocket.readyState === WebSocket.OPEN) {
+            elevenLabsSocket.close(1000, "Client disconnected");
+        }
+    };
+});
+// --- END OF FIX ---
+
 // Root route for backend
 app.get("/", (req, res) => {
     res.json({
