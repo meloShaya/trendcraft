@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Mic, Loader, Zap, X } from 'lucide-react';
+import { Mic, Loader, Zap, X, AlertCircle } from 'lucide-react';
 
 // --- Configuration ---
 // It's highly recommended to use environment variables for your API key.
@@ -16,7 +16,7 @@ interface VoiceChatProps {
 
 interface ConversationMessage {
     id: string;
-    type: 'user' | 'assistant';
+    type: 'user' | 'assistant' | 'error';
     text: string;
 }
 
@@ -26,6 +26,7 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated, token }) => {
     const [isListening, setIsListening] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false); // For when your backend is thinking
     const [conversation, setConversation] = useState<ConversationMessage[]>([]);
+    const [hasApiKeyError, setHasApiKeyError] = useState(false);
     
     // Refs for various Web APIs and state
     const sttSocketRef = useRef<WebSocket | null>(null);
@@ -37,11 +38,21 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated, token }) => {
     // Effect to add initial welcome message
     useEffect(() => {
         if (isOpen && conversation.length === 0) {
-            setConversation([{
-                id: 'welcome-message',
-                type: 'assistant',
-                text: "Hi! I'm Kai, your creative partner. What should we create today? Try saying 'Draft a witty tweet about space coffee'."
-            }]);
+            // Check if API key is properly configured
+            if (!ELEVENLABS_API_KEY || ELEVENLABS_API_KEY === "YOUR_ELEVENLABS_API_KEY_HERE") {
+                setHasApiKeyError(true);
+                setConversation([{
+                    id: 'api-key-error',
+                    type: 'error',
+                    text: "ElevenLabs API key is not configured. Please check your environment variables."
+                }]);
+            } else {
+                setConversation([{
+                    id: 'welcome-message',
+                    type: 'assistant',
+                    text: "Hi! I'm Kai, your creative partner. What should we create today? Try saying 'Draft a witty tweet about space coffee'."
+                }]);
+            }
         }
     }, [isOpen, conversation.length]);
 
@@ -66,7 +77,10 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated, token }) => {
 
         try {
             const response = await fetch(ttsUrl, { method: 'POST', headers, body });
-            if (!response.ok) throw new Error("TTS request failed");
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`TTS request failed: ${response.status} - ${errorText}`);
+            }
 
             const audioBlob = await response.blob();
             const audioUrl = URL.createObjectURL(audioBlob);
@@ -78,6 +92,7 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated, token }) => {
 
         } catch (error) {
             console.error("Error with ElevenLabs TTS:", error);
+            addMessage('error', `TTS Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
             setIsProcessing(false);
         }
     };
@@ -126,13 +141,20 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated, token }) => {
 
     // --- Core Logic: Speech-to-Text (STT) via WebSocket ---
     const startListening = async () => {
-        if (isListening) return;
+        if (isListening || hasApiKeyError) return;
+
+        // Validate API key before attempting connection
+        if (!ELEVENLABS_API_KEY || ELEVENLABS_API_KEY === "YOUR_ELEVENLABS_API_KEY_HERE") {
+            addMessage('error', 'ElevenLabs API key is not configured properly.');
+            return;
+        }
 
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             mediaRecorderRef.current = new MediaRecorder(stream);
             
-            const sttSocket = new WebSocket(`wss://api.elevenlabs.io/v1/speech-to-text/stream?model_id=eleven_multilingual_v2&api_key=${ELEVENLABS_API_KEY}`);
+            const sttUrl = `wss://api.elevenlabs.io/v1/speech-to-text/stream?model_id=eleven_multilingual_v2&api_key=${ELEVENLABS_API_KEY}`;
+            const sttSocket = new WebSocket(sttUrl);
             sttSocketRef.current = sttSocket;
             
             sttSocket.onopen = () => {
@@ -159,14 +181,24 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated, token }) => {
                 }
             };
 
-            sttSocket.onclose = () => {
-                console.log("STT WebSocket closed.");
+            sttSocket.onclose = (event) => {
+                console.log("STT WebSocket closed:", event.code, event.reason);
                 if (mediaRecorderRef.current?.state === 'recording') {
                     mediaRecorderRef.current.stop();
                 }
                 stream.getTracks().forEach(track => track.stop());
                 setIsListening(false);
-                if(finalTranscriptRef.current) {
+                
+                // Handle different close codes
+                if (event.code === 1006) {
+                    addMessage('error', 'Connection failed. Please check your API key and internet connection.');
+                } else if (event.code === 1008) {
+                    addMessage('error', 'Authentication failed. Please verify your ElevenLabs API key.');
+                } else if (event.code !== 1000 && event.code !== 1001) {
+                    addMessage('error', `Connection error (${event.code}): ${event.reason || 'Unknown error'}`);
+                }
+                
+                if(finalTranscriptRef.current && event.code === 1000) {
                     processUserRequest(finalTranscriptRef.current);
                 }
             };
@@ -174,10 +206,22 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated, token }) => {
             sttSocket.onerror = (error) => {
                 console.error("STT WebSocket error:", error);
                 setIsListening(false);
+                
+                // More specific error handling
+                if (sttSocket.readyState === WebSocket.CLOSED) {
+                    addMessage('error', 'Failed to connect to speech recognition service. Please check your API key and try again.');
+                } else {
+                    addMessage('error', 'Speech recognition error occurred. Please try again.');
+                }
             };
             
         } catch (error) {
             console.error("Failed to start listening:", error);
+            if (error instanceof Error && error.name === 'NotAllowedError') {
+                addMessage('error', 'Microphone access denied. Please allow microphone permissions and try again.');
+            } else {
+                addMessage('error', 'Failed to access microphone. Please check your device settings.');
+            }
         }
     };
 
@@ -185,7 +229,7 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated, token }) => {
         if (!isListening) return;
         
         if (sttSocketRef.current?.readyState === WebSocket.OPEN) {
-            sttSocketRef.current.close();
+            sttSocketRef.current.close(1000, 'User stopped listening');
         }
         
         if (mediaRecorderRef.current?.state === "recording") {
@@ -205,7 +249,7 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated, token }) => {
         }, 2000); // Stop after 2 seconds of silence
     };
 
-    const addMessage = (type: 'user' | 'assistant', text: string) => {
+    const addMessage = (type: 'user' | 'assistant' | 'error', text: string) => {
         setConversation(prev => [...prev, { id: Date.now().toString(), type, text }]);
     };
     
@@ -262,8 +306,15 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated, token }) => {
                     <div className="flex-1 overflow-y-auto p-4 space-y-4">
                         {conversation.map((msg) => (
                             <div key={msg.id} className={`flex ${msg.type === 'user' ? 'justify-end' : 'justify-start'}`}>
-                                <div className={`max-w-[80%] p-3 rounded-2xl text-sm ${msg.type === 'user' ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white'}`}>
-                                    {msg.text}
+                                <div className={`max-w-[80%] p-3 rounded-2xl text-sm flex items-start space-x-2 ${
+                                    msg.type === 'user' 
+                                        ? 'bg-blue-600 text-white' 
+                                        : msg.type === 'error'
+                                        ? 'bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 border border-red-200 dark:border-red-700'
+                                        : 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white'
+                                }`}>
+                                    {msg.type === 'error' && <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />}
+                                    <span>{msg.text}</span>
                                 </div>
                             </div>
                         ))}
@@ -279,14 +330,23 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated, token }) => {
                     <div className="border-t border-gray-200 dark:border-gray-700 p-4 text-center">
                         <button
                             onClick={isListening ? stopListening : startListening}
+                            disabled={hasApiKeyError}
                             className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto transition-all ${
-                                isListening ? 'bg-red-500 text-white animate-pulse' : 'bg-blue-600 text-white'
+                                hasApiKeyError
+                                    ? 'bg-gray-400 text-gray-600 cursor-not-allowed'
+                                    : isListening 
+                                    ? 'bg-red-500 text-white animate-pulse' 
+                                    : 'bg-blue-600 text-white hover:bg-blue-700'
                             }`}
                         >
                             <Mic className="h-7 w-7" />
                         </button>
                         <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-                           {isListening ? "Listening... Click to stop" : "Click mic to speak"}
+                           {hasApiKeyError 
+                               ? "API key required" 
+                               : isListening 
+                               ? "Listening... Click to stop" 
+                               : "Click mic to speak"}
                         </p>
                     </div>
                 </div>
