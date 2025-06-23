@@ -56,7 +56,7 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated }) => {
         // Send authentication
         ws.send(JSON.stringify({
           type: 'auth',
-          api_key: import.meta.env.VITE_ELEVENLABS_API_KEY || 'sk_3bec2eca01b53efdf34dc6ba5c61a223d5caf072824d1d2a'
+          api_key: import.meta.env.VITE_ELEVENLABS_API_KEY
         }));
       };
 
