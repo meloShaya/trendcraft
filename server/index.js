@@ -61,7 +61,7 @@ app.ws("/api/voice/stream", (ws, req) => {
     "wss://api.elevenlabs.io/v1/speech-to-text/stream?model_id=eleven_multilingual_v2",
     {
       headers: {
-        "xi-api-key": process.env.ELEVENLABS_API_KEY!,
+        "xi-api-key": process.env.ELEVENLABS_API_KEY,
       },
     }
   );
