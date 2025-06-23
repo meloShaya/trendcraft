@@ -1,4 +1,5 @@
 import express from "express";
+import expressWs from "express-ws";
 import cors from "cors";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
@@ -6,11 +7,13 @@ import dotenv from "dotenv";
 import axios from "axios";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { ElevenLabsClient } from "elevenlabs";
+import { WebSocket } from "ws";
 
 // Load environment variables
 dotenv.config();
 
 const app = express();
+expressWs(app); // Initialize express-ws middleware
 const PORT = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET;
 
