@@ -58,7 +58,7 @@ app.ws("/api/voice/stream", (ws, req) => {
 
   // Pass the API key in headers, remove the ?api_key=…
   const elevenLabsSocket = new WsClient(
-    "wss://api.elevenlabs.io/v1/speech-to-text/stream?",
+    "wss://api.elevenlabs.io/v1/speech-to-text/stream",
     {
       headers: {
         "xi-api-key": process.env.ELEVENLABS_API_KEY,
