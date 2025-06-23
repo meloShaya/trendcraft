@@ -29,6 +29,7 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated }) => {
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
 
   // Initialize conversation with welcome message
   useEffect(() => {
@@ -46,23 +47,30 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated }) => {
     try {
       setConnectionError(null);
       
-      // Create WebSocket connection to ElevenLabs
-      const ws = new WebSocket('wss://api.elevenlabs.io/v1/convai/conversation?agent_id=your_agent_id');
+      // Get the API key from environment variable
+      const apiKey = import.meta.env.VITE_ELEVENLABS_API_KEY;
+      
+      if (!apiKey) {
+        setConnectionError('ElevenLabs API key not configured');
+        return;
+      }
+      
+      // Create WebSocket connection with API key as query parameter
+      const wsUrl = `wss://api.elevenlabs.io/v1/convai/conversation?agent_id=bHQjKVMjI7uDAHdIBUYJ&api_key=${apiKey}`;
+      console.log('Connecting to ElevenLabs WebSocket...');
+      
+      const ws = new WebSocket(wsUrl);
       
       ws.onopen = () => {
         console.log('Connected to ElevenLabs');
         setIsConnected(true);
-        
-        // Send authentication
-        ws.send(JSON.stringify({
-          type: 'auth',
-          api_key: import.meta.env.VITE_ELEVENLABS_API_KEY
-        }));
+        setConnectionError(null);
       };
 
       ws.onmessage = async (event) => {
         try {
           const data = JSON.parse(event.data);
+          console.log('Received message from ElevenLabs:', data);
           await handleElevenLabsMessage(data);
         } catch (error) {
           console.error('Error parsing WebSocket message:', error);
@@ -71,14 +79,18 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated }) => {
 
       ws.onerror = (error) => {
         console.error('WebSocket error:', error);
-        setConnectionError('Failed to connect to voice service');
+        setConnectionError('Failed to connect to voice service. Please check your API key.');
         setIsConnected(false);
       };
 
-      ws.onclose = () => {
-        console.log('WebSocket connection closed');
+      ws.onclose = (event) => {
+        console.log('WebSocket connection closed:', event.code, event.reason);
         setIsConnected(false);
         setIsListening(false);
+        
+        if (event.code !== 1000) { // Not a normal closure
+          setConnectionError(`Connection closed unexpectedly (${event.code}): ${event.reason || 'Unknown reason'}`);
+        }
       };
 
       wsRef.current = ws;
@@ -115,8 +127,13 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated }) => {
         }
         break;
         
+      case 'error':
+        console.error('ElevenLabs error:', data);
+        setConnectionError(`Voice service error: ${data.message || 'Unknown error'}`);
+        break;
+        
       default:
-        console.log('Unknown message type:', data.type);
+        console.log('Unknown message type:', data.type, data);
     }
   };
 
@@ -282,13 +299,70 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated }) => {
     }
   };
 
+  // Fallback to Web Speech API if ElevenLabs WebSocket fails
+  const initializeSpeechRecognition = () => {
+    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      const recognition = new SpeechRecognition();
+      
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+      
+      recognition.onstart = () => {
+        console.log('Speech recognition started');
+        setIsListening(true);
+      };
+      
+      recognition.onresult = (event) => {
+        const transcript = Array.from(event.results)
+          .map(result => result[0])
+          .map(result => result.transcript)
+          .join('');
+          
+        if (event.results[event.results.length - 1].isFinal) {
+          console.log('Final transcript:', transcript);
+          handleUserTranscript(transcript);
+        }
+      };
+      
+      recognition.onerror = (event) => {
+        console.error('Speech recognition error:', event.error);
+        setIsListening(false);
+      };
+      
+      recognition.onend = () => {
+        console.log('Speech recognition ended');
+        setIsListening(false);
+      };
+      
+      recognitionRef.current = recognition;
+      return true;
+    }
+    return false;
+  };
+
   const startListening = async () => {
     try {
       if (!isConnected) {
+        // Try to connect to ElevenLabs first
         await connectToElevenLabs();
+        
+        // If still not connected after a short delay, fall back to Web Speech API
+        setTimeout(() => {
+          if (!isConnected) {
+            console.log('Falling back to Web Speech API');
+            if (initializeSpeechRecognition() && recognitionRef.current) {
+              recognitionRef.current.start();
+            } else {
+              setConnectionError('Speech recognition not supported in this browser');
+            }
+          }
+        }, 2000);
         return;
       }
       
+      // If connected to ElevenLabs, use their audio streaming
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       mediaStreamRef.current = stream;
       
@@ -329,6 +403,12 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated }) => {
   const stopListening = () => {
     setIsListening(false);
     
+    // Stop Web Speech API if being used
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+    }
+    
+    // Stop audio streaming
     if (mediaStreamRef.current) {
       mediaStreamRef.current.getTracks().forEach(track => track.stop());
       mediaStreamRef.current = null;
@@ -373,7 +453,15 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated }) => {
     
     setIsConnected(false);
     setConversation([]);
+    setConnectionError(null);
   };
+
+  // Auto-connect when chat opens
+  useEffect(() => {
+    if (isOpen && !isConnected && !wsRef.current) {
+      connectToElevenLabs();
+    }
+  }, [isOpen]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -408,7 +496,7 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated }) => {
               <div>
                 <h3 className="font-semibold">Voice Assistant</h3>
                 <p className="text-xs opacity-90">
-                  {isConnected ? 'Connected' : 'Connecting...'}
+                  {isConnected ? 'Connected' : connectionError ? 'Connection Failed' : 'Connecting...'}
                 </p>
               </div>
             </div>
@@ -424,6 +512,15 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated }) => {
           {connectionError && (
             <div className="bg-red-50 dark:bg-red-900/20 border-l-4 border-red-500 p-3">
               <p className="text-red-700 dark:text-red-300 text-sm">{connectionError}</p>
+              <button
+                onClick={() => {
+                  setConnectionError(null);
+                  connectToElevenLabs();
+                }}
+                className="text-red-600 dark:text-red-400 text-xs underline mt-1"
+              >
+                Try again
+              </button>
             </div>
           )}
 
@@ -466,11 +563,11 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated }) => {
             <div className="flex items-center justify-center space-x-4">
               <button
                 onClick={toggleListening}
-                disabled={!isConnected}
+                disabled={!isConnected && !recognitionRef.current}
                 className={`w-12 h-12 rounded-full flex items-center justify-center transition-all ${
                   isListening
                     ? 'bg-red-500 hover:bg-red-600 text-white animate-pulse'
-                    : 'bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50'
+                    : 'bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 disabled:cursor-not-allowed'
                 }`}
                 title={isListening ? 'Stop listening' : 'Start listening'}
               >
@@ -493,7 +590,7 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated }) => {
             
             <div className="text-center mt-3">
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                {isListening ? 'Listening...' : isSpeaking ? 'Speaking...' : 'Click mic to start'}
+                {isListening ? 'Listening...' : isSpeaking ? 'Speaking...' : isConnected ? 'Click mic to start' : 'Connecting...'}
               </p>
             </div>
           </div>
