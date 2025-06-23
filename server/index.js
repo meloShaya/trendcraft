@@ -58,7 +58,7 @@ app.ws("/api/voice/stream", (ws, req) => {
 
   // Pass the API key in headers, remove the ?api_key=…
   const elevenLabsSocket = new WsClient(
-    "wss://api.elevenlabs.io/v1/speech-to-text/stream?model_id=eleven_multilingual_v2",
+    "wss://api.elevenlabs.io/v1/speech-to-text/stream?",
     {
       headers: {
         "xi-api-key": process.env.ELEVENLABS_API_KEY,
@@ -79,7 +79,7 @@ app.ws("/api/voice/stream", (ws, req) => {
 	// 3. When your client sends audio data to your server...
 	ws.onmessage = (msg) => {
 		// ...forward that audio data directly to ElevenLabs.
-		if (elevenLabsSocket.readyState === WebSocket.OPEN) {
+		if (elevenLabsSocket.readyState === WsClient.OPEN) {
 			elevenLabsSocket.send(msg.data);
 		}
 	};
@@ -87,7 +87,7 @@ app.ws("/api/voice/stream", (ws, req) => {
 	// 4. When ElevenLabs sends a message (like a transcript) back to your server...
 	elevenLabsSocket.onmessage = (event) => {
 		// ...forward that message directly back to your client.
-		if (ws.readyState === WebSocket.OPEN) {
+		if (ws.readyState === WsClient.OPEN) {
 			ws.send(event.data);
 		}
 	};
@@ -100,14 +100,14 @@ app.ws("/api/voice/stream", (ws, req) => {
 
 	elevenLabsSocket.onclose = (event) => {
 		console.log("ElevenLabs WebSocket closed:", event.code, event.reason);
-		if (ws.readyState === WebSocket.OPEN) {
+		if (ws.readyState === WsClient.OPEN) {
 			ws.close(event.code, event.reason);
 		}
 	};
 
 	ws.onclose = () => {
 		console.log("Client disconnected from server WebSocket");
-		if (elevenLabsSocket.readyState === WebSocket.OPEN) {
+		if (elevenLabsSocket.readyState === WsClient.OPEN) {
 			elevenLabsSocket.close(1000, "Client disconnected");
 		}
 	};
