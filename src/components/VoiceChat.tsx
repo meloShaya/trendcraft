@@ -3,7 +3,7 @@ import { Mic, Loader, Zap, X, AlertCircle } from 'lucide-react';
 
 // --- Configuration ---
 // In your project root, create a .env file: REACT_APP_ELEVENLABS_API_KEY=your_key_here
-const ELEVENLABS_API_KEY = import.meta.env.VITE_APP_ELEVENLABS_API_KEY || "YOUR_ELEVENLABS_API_KEY_HERE";
+const ELEVENLABS_API_KEY = import.meta.env.VITE_ELEVENLABS_API_KEY || "YOUR_ELEVENLABS_API_KEY_HERE";
 const VOICE_ID = "rfkTsdZrVWEVhDycUYn9"; // Example voice ID.
 
 // --- Interfaces ---
