@@ -50,7 +50,7 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated, token }) => {
                 setConversation([{
                     id: 'welcome-message',
                     type: 'assistant',
-                    text: "Hi! I'm Kai, your creative partner. What should we create today? Try saying 'Draft a witty tweet about space coffee'."
+                    text: "Hi! I'm Tessa, your creative partner. What should we create today? Try saying 'Draft a witty tweet about space coffee'."
                 }]);
             }
         }
