@@ -75,6 +75,7 @@ app.ws("/api/voice/stream", (ws, req) => {
     // close the client with a real error code & message
     ws.close(1011, "ElevenLabs STT connection failed");
   };
+});
 
 
 	// 3. When your client sends audio data to your server...
