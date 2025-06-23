@@ -58,7 +58,7 @@ app.ws("/api/voice/stream", (ws, req) => {
   // 1) open the **correct** ElevenLabs socket
   const elSocket = new WsClient(
     "wss://api.elevenlabs.io/v1/streaming/speech-to-text",
-    { headers: { "xi-api-key": process.env.ELEVENLABS_API_KEY! } }
+    { headers: { "xi-api-key": process.env.ELEVENLABS_API_KEY } }
   );
 
   // 2) once open, send the model selection as JSON
