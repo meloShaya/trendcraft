@@ -40,6 +40,7 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated }) => {
     const finalTranscriptRef = useRef<string>("");
     const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const streamRef = useRef<MediaStream | null>(null);
+    const connectionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
     const isApiConfigured = ELEVENLABS_API_KEY && ELEVENLABS_API_KEY !== "YOUR_ELEVENLABS_API_KEY_HERE";
     const maxReconnectAttempts = 3;
@@ -81,6 +82,10 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated }) => {
         if (silenceTimeoutRef.current) {
             clearTimeout(silenceTimeoutRef.current);
             silenceTimeoutRef.current = null;
+        }
+        if (connectionTimeoutRef.current) {
+            clearTimeout(connectionTimeoutRef.current);
+            connectionTimeoutRef.current = null;
         }
     };
 
@@ -231,13 +236,19 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated }) => {
                 audio: {
                     echoCancellation: true,
                     noiseSuppression: true,
-                    autoGainControl: true
+                    autoGainControl: true,
+                    sampleRate: 16000
                 }
             });
             streamRef.current = stream;
             
+            // Create MediaRecorder with proper settings for WebSocket streaming
+            const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') 
+                ? 'audio/webm;codecs=opus' 
+                : 'audio/webm';
+                
             mediaRecorderRef.current = new MediaRecorder(stream, {
-                mimeType: 'audio/webm;codecs=opus'
+                mimeType: mimeType
             });
             
             setProcessingStatus('Connecting to voice service...');
@@ -245,16 +256,44 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated }) => {
             // Close existing connection if any
             if (sttSocketRef.current) {
                 sttSocketRef.current.close();
+                sttSocketRef.current = null;
             }
             
-            const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-            const localWsUrl = `${protocol}//${window.location.host}/api/voice/stream`;
+            // Clear any existing connection timeout
+            if (connectionTimeoutRef.current) {
+                clearTimeout(connectionTimeoutRef.current);
+            }
             
-            const sttSocket = new WebSocket(localWsUrl);
+            // Use the correct WebSocket URL that matches the server route
+            const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+            const wsUrl = `${protocol}//${window.location.host}/api/voice/stream`;
+            
+            console.log('Connecting to WebSocket:', wsUrl);
+            
+            const sttSocket = new WebSocket(wsUrl);
             sttSocketRef.current = sttSocket;
 
+            // Set connection timeout
+            connectionTimeoutRef.current = setTimeout(() => {
+                if (connectionStatus === 'connecting') {
+                    console.log('WebSocket connection timeout');
+                    addMessage('error', 'Connection timeout. Please try again.');
+                    setConnectionStatus('error');
+                    if (sttSocket.readyState === WebSocket.CONNECTING || sttSocket.readyState === WebSocket.OPEN) {
+                        sttSocket.close();
+                    }
+                }
+            }, 15000); // 15 second timeout
+
             sttSocket.onopen = () => {
-                console.log("Connected to backend proxy WebSocket.");
+                console.log("Connected to backend proxy WebSocket successfully");
+                
+                // Clear connection timeout
+                if (connectionTimeoutRef.current) {
+                    clearTimeout(connectionTimeoutRef.current);
+                    connectionTimeoutRef.current = null;
+                }
+                
                 setIsListening(true);
                 setIsConnected(true);
                 setConnectionStatus('connected');
@@ -262,13 +301,22 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated }) => {
                 setProcessingStatus('Listening...');
                 finalTranscriptRef.current = "";
                 
+                // Start recording after successful connection
                 if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'inactive') {
-                    mediaRecorderRef.current.start(250); // Send data every 250ms
+                    try {
+                        mediaRecorderRef.current.start(100); // Send data every 100ms for better responsiveness
+                        console.log('MediaRecorder started successfully');
+                    } catch (error) {
+                        console.error('Failed to start MediaRecorder:', error);
+                        addMessage('error', 'Failed to start recording. Please try again.');
+                        setConnectionStatus('error');
+                    }
                 }
             };
 
             mediaRecorderRef.current.ondataavailable = (event) => {
                 if (event.data.size > 0 && sttSocket.readyState === WebSocket.OPEN) {
+                    console.log('Sending audio data, size:', event.data.size);
                     sttSocket.send(event.data);
                     resetSilenceTimeout();
                 }
@@ -276,22 +324,35 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated }) => {
             
             sttSocket.onmessage = (event) => {
                 try {
+                    console.log('Received WebSocket message:', event.data);
                     const data = JSON.parse(event.data);
+                    
                     if (data.transcript) {
                         finalTranscriptRef.current += data.transcript;
-                        setProcessingStatus('Processing speech...');
+                        setProcessingStatus(`Processing: "${data.transcript}"`);
+                        console.log('Transcript received:', data.transcript);
                     }
+                    
                     if (data.is_final) {
+                        console.log('Final transcript:', finalTranscriptRef.current);
                         setProcessingStatus('Finalizing...');
                         stopListening();
                     }
                 } catch (error) {
                     console.error('Error parsing WebSocket message:', error);
+                    addMessage('error', 'Error processing voice data.');
                 }
             };
 
             sttSocket.onclose = (event) => {
-                console.log("Local WebSocket closed:", event.code, event.reason);
+                console.log("WebSocket closed:", event.code, event.reason);
+                
+                // Clear connection timeout
+                if (connectionTimeoutRef.current) {
+                    clearTimeout(connectionTimeoutRef.current);
+                    connectionTimeoutRef.current = null;
+                }
+                
                 setIsListening(false);
                 setIsConnected(false);
                 setProcessingStatus('');
@@ -304,45 +365,62 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated }) => {
                     streamRef.current.getTracks().forEach(track => track.stop());
                 }
                 
-                // Only attempt reconnection for unexpected closures
-                if (event.code !== 1000 && event.code !== 1001 && reconnectAttempts < maxReconnectAttempts) {
-                    setConnectionStatus('error');
-                    addMessage('error', `Voice connection lost (${event.code}). Attempting to reconnect...`);
-                    attemptReconnection();
-                } else {
+                // Handle different close codes
+                if (event.code === 1000) {
+                    // Normal closure
                     setConnectionStatus('disconnected');
-                    if (finalTranscriptRef.current && event.code === 1000) {
-                        processUserRequest(finalTranscriptRef.current);
+                    if (finalTranscriptRef.current.trim()) {
+                        console.log('Processing final transcript:', finalTranscriptRef.current);
+                        processUserRequest(finalTranscriptRef.current.trim());
+                    }
+                } else if (event.code === 1006) {
+                    // Abnormal closure - likely connection issue
+                    setConnectionStatus('error');
+                    addMessage('error', 'Voice connection lost unexpectedly. Please try again.');
+                    if (reconnectAttempts < maxReconnectAttempts) {
+                        attemptReconnection();
+                    }
+                } else {
+                    // Other error codes
+                    setConnectionStatus('error');
+                    addMessage('error', `Voice connection closed (${event.code}). ${event.reason || 'Please try again.'}`);
+                    if (reconnectAttempts < maxReconnectAttempts) {
+                        attemptReconnection();
                     }
                 }
             };
 
             sttSocket.onerror = (error) => {
-                console.error("Local WebSocket error:", error);
+                console.error("WebSocket error:", error);
+                
+                // Clear connection timeout
+                if (connectionTimeoutRef.current) {
+                    clearTimeout(connectionTimeoutRef.current);
+                    connectionTimeoutRef.current = null;
+                }
+                
                 setConnectionStatus('error');
                 setIsListening(false);
                 setIsConnected(false);
                 setProcessingStatus('');
-                addMessage('error', 'Could not establish a voice connection to the server.');
+                
+                addMessage('error', 'Could not establish voice connection. Please check your internet connection and try again.');
                 
                 if (reconnectAttempts < maxReconnectAttempts) {
                     attemptReconnection();
                 }
             };
 
-            // Set a timeout for connection
-            setTimeout(() => {
-                if (connectionStatus === 'connecting') {
-                    addMessage('error', 'Connection timeout. Please try again.');
-                    setConnectionStatus('error');
-                    sttSocket.close();
-                }
-            }, 10000); // 10 second timeout
-
         } catch (error) {
             console.error("Failed to start listening:", error);
             setConnectionStatus('error');
             setProcessingStatus('');
+            
+            // Clear connection timeout
+            if (connectionTimeoutRef.current) {
+                clearTimeout(connectionTimeoutRef.current);
+                connectionTimeoutRef.current = null;
+            }
             
             if (error instanceof Error) {
                 if (error.name === 'NotAllowedError') {
@@ -361,7 +439,14 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated }) => {
     const stopListening = () => {
         if (!isListening) return;
         
+        console.log('Stopping listening...');
         setProcessingStatus('Stopping...');
+        
+        // Clear connection timeout
+        if (connectionTimeoutRef.current) {
+            clearTimeout(connectionTimeoutRef.current);
+            connectionTimeoutRef.current = null;
+        }
         
         if (sttSocketRef.current?.readyState === WebSocket.OPEN) {
             sttSocketRef.current.close(1000, "User stopped listening");
@@ -390,9 +475,10 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated }) => {
         if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
         silenceTimeoutRef.current = setTimeout(() => {
             if (isListening) {
+                console.log('Silence timeout reached, stopping listening');
                 stopListening();
             }
-        }, 4000); // 4 seconds of silence
+        }, 5000); // 5 seconds of silence
     };
 
     const parseContentRequest = (text: string) => {
