@@ -3,9 +3,9 @@ import { Mic, Loader, Zap, X } from 'lucide-react';
 
 // --- Configuration ---
 // It's highly recommended to use environment variables for your API key.
-// In your project root, create a .env file: REACT_APP_ELEVENLABS_API_KEY=your_key_here
-// Note: Changed from VITE_ to REACT_APP_ for broader compatibility.
-const ELEVENLABS_API_KEY = process.env.REACT_APP_ELEVENLABS_API_KEY || "YOUR_ELEVENLABS_API_KEY_HERE";
+// In your project root, create a .env file: VITE_ELEVENLABS_API_KEY=your_key_here
+// Note: Changed to VITE_ prefix for Vite compatibility.
+const ELEVENLABS_API_KEY = import.meta.env.VITE_ELEVENLABS_API_KEY || "YOUR_ELEVENLABS_API_KEY_HERE";
 const VOICE_ID = "rfkTsdZrVWEVhDycUYn9"; // Example: Rachel's voice ID. Replace with your preferred voice.
 
 // --- Interfaces ---
