@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import Sidebar from './Sidebar';
 import Header from './Header';
+import VoiceChat from './VoiceChat';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -8,6 +9,12 @@ interface LayoutProps {
 
 const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  const handleContentGenerated = (content: any) => {
+    // You can handle the generated content here
+    // For example, show a notification or navigate to the content generator
+    console.log('Content generated via voice:', content);
+  };
 
   return (
     <div className="flex h-screen bg-gray-50 dark:bg-gray-900">
@@ -27,6 +34,9 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           {children}
         </main>
       </div>
+      
+      {/* Voice Chat Component */}
+      <VoiceChat onContentGenerated={handleContentGenerated} />
     </div>
   );
 };

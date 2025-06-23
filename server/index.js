@@ -5,6 +5,7 @@ import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
 import axios from 'axios';
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { ElevenLabsClient } from "elevenlabs";
 
 // Load environment variables
 dotenv.config();
@@ -23,6 +24,17 @@ console.log("[OK] JWT_SECRET loaded successfully.");
 // Initialize Google Gemini AI
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
+
+// Initialize ElevenLabs client
+let elevenLabsClient = null;
+if (process.env.ELEVENLABS_API_KEY) {
+    elevenLabsClient = new ElevenLabsClient({
+        apiKey: process.env.ELEVENLABS_API_KEY
+    });
+    console.log("[OK] ElevenLabs API key loaded successfully.");
+} else {
+    console.warn("[WARNING] ELEVENLABS_API_KEY not found in environment variables.");
+}
 
 // Middleware
 app.use(
@@ -46,6 +58,7 @@ app.get("/", (req, res) => {
             posts: "/api/posts",
             analytics: "/api/analytics/*",
             user: "/api/user/*",
+            voice: "/api/voice/*",
         },
     });
 });
@@ -150,11 +163,6 @@ const transformTrendData = (apifyData, platform = "twitter") => {
                 // Extract ONLY real Twitter trend data
                 if (item.trend || item.name || item.query) {
                     const keyword = item.trend || item.name || item.query;
-                    // Skip if it's generic like "Trend 1", "Trend 2" etc.
-                    // if (keyword.match(/^Trend \d+$/i)) {
-                    //     console.log(`Skipping generic trend: ${keyword}`);
-                    //     continue;
-                    // }
                     
                     trendData = {
                         keyword: cleanKeyword(keyword),
@@ -467,7 +475,7 @@ const fetchTrendsFromApify = async (platform = "twitter") => {
             platform,
             status: error.response?.status
         });
-        return []; // Return empty array instead of fallbac
+        return []; // Return empty array instead of fallback
     }
 };
 
@@ -874,6 +882,49 @@ app.post("/api/content/generate", authenticateToken, async (req, res) => {
     res.json(generatedContent);
 });
 
+// Voice AI Routes
+app.post("/api/voice/text-to-speech", authenticateToken, async (req, res) => {
+    try {
+        const { text, voice = "Rachel" } = req.body;
+        
+        if (!elevenLabsClient) {
+            return res.status(500).json({ error: "ElevenLabs not configured" });
+        }
+        
+        const audio = await elevenLabsClient.generate({
+            voice,
+            text,
+            model_id: "eleven_monolingual_v1"
+        });
+        
+        // Convert audio stream to base64
+        const chunks = [];
+        for await (const chunk of audio) {
+            chunks.push(chunk);
+        }
+        const audioBuffer = Buffer.concat(chunks);
+        const audioBase64 = audioBuffer.toString('base64');
+        
+        res.json({ audio: audioBase64 });
+    } catch (error) {
+        console.error('Error generating speech:', error);
+        res.status(500).json({ error: 'Failed to generate speech' });
+    }
+});
+
+app.post("/api/voice/speech-to-text", authenticateToken, async (req, res) => {
+    try {
+        const { audio } = req.body;
+        
+        // For now, return a placeholder response
+        // In a real implementation, you would use a speech-to-text service
+        res.json({ text: "Speech-to-text functionality coming soon" });
+    } catch (error) {
+        console.error('Error transcribing speech:', error);
+        res.status(500).json({ error: 'Failed to transcribe speech' });
+    }
+});
+
 // Posts Routes
 app.get("/api/posts", authenticateToken, (req, res) => {
     const userPosts = posts.filter((p) => p.userId === req.user.id);
@@ -915,5 +966,6 @@ app.listen(PORT, () => {
     console.log(`🎯 Frontend should run on: http://localhost:5173`);
     console.log(`🤖 Gemini AI: ${process.env.GEMINI_API_KEY ? "Configured" : "Not configured"}`);
     console.log(`🕷️ Apify: ${process.env.APIFY_API_TOKEN ? "Configured - REAL DATA ONLY" : "Not configured - NO FALLBACKS"}`);
+    console.log(`🎤 ElevenLabs: ${process.env.ELEVENLABS_API_KEY ? "Configured" : "Not configured"}`);
     console.log('✅ Server started successfully!');
 });
