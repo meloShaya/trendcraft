@@ -52,66 +52,54 @@ app.use(
 );
 app.use(express.json());
 
-
 app.ws("/api/voice/stream", (ws, req) => {
   console.log("Client connected to server WebSocket");
 
-  // Pass the API key in headers, remove the ?api_key=…
-  const elevenLabsSocket = new WsClient(
+  // 1) open the **correct** ElevenLabs socket
+  const elSocket = new WsClient(
     "wss://api.elevenlabs.io/v1/streaming/speech-to-text",
-    {
-      headers: {
-        "xi-api-key": process.env.ELEVENLABS_API_KEY,
-      },
-    }
+    { headers: { "xi-api-key": process.env.ELEVENLABS_API_KEY! } }
   );
 
-  elevenLabsSocket.onopen = () => {
-    console.log("✅ Server connected to ElevenLabs STT socket");
+  // 2) once open, send the model selection as JSON
+  elSocket.onopen = () => {
+    console.log("✅ Connected to ElevenLabs STT socket");
+    elSocket.send(JSON.stringify({
+      model_id: "eleven_multilingual_v2",
+      // (you can add any other config fields here)
+    }));
   };
 
-  elevenLabsSocket.onerror = (err) => {
-    console.error("❌ ElevenLabs WebSocket error:", err);
-    // close the client with a real error code & message
-    ws.close(1011, "ElevenLabs STT connection failed");
+  // 3) forward audio from client to ElevenLabs
+  ws.onmessage = (msg) => {
+    if (elSocket.readyState === WsClient.OPEN) {
+      elSocket.send(msg.data);
+    }
   };
 
-	// 3. When your client sends audio data to your server...
-	ws.onmessage = (msg) => {
-		// ...forward that audio data directly to ElevenLabs.
-		if (elevenLabsSocket.readyState === WsClient.OPEN) {
-			elevenLabsSocket.send(msg.data);
-		}
-	};
+  // 4) relay transcripts back to client
+  elSocket.onmessage = (evt) => {
+    if (ws.readyState === WsClient.OPEN) {
+      ws.send(evt.data);
+    }
+  };
 
-	// 4. When ElevenLabs sends a message (like a transcript) back to your server...
-	elevenLabsSocket.onmessage = (event) => {
-		// ...forward that message directly back to your client.
-		if (ws.readyState === WsClient.OPEN) {
-			ws.send(event.data);
-		}
-	};
-
-	// 5. Handle errors and closes by cleaning up both connections
-	elevenLabsSocket.onerror = (error) => {
-		console.error("ElevenLabs WebSocket error:", error);
-		ws.close(1011, "Error connecting to voice service");
-	};
-
-	elevenLabsSocket.onclose = (event) => {
-		console.log("ElevenLabs WebSocket closed:", event.code, event.reason);
-		if (ws.readyState === WsClient.OPEN) {
-			ws.close(event.code, event.reason);
-		}
-	};
-
-	ws.onclose = () => {
-		console.log("Client disconnected from server WebSocket");
-		if (elevenLabsSocket.readyState === WsClient.OPEN) {
-			elevenLabsSocket.close(1000, "Client disconnected");
-		}
-	};
+  // 5) errors/closes clean up both sockets
+  elSocket.onerror = (err) => {
+    console.error("ElevenLabs error:", err);
+    ws.close(1011, "ElevenLabs STT failed");
+  };
+  elSocket.onclose = (ev) => {
+    console.log("ElevenLabs socket closed:", ev.code, ev.reason);
+    if (ws.readyState === WsClient.OPEN) ws.close(ev.code, ev.reason);
+  };
+  ws.onclose = () => {
+    if (elSocket.readyState === WsClient.OPEN) {
+      elSocket.close(1000, "client disconnected");
+    }
+  };
 });
+
 // --- END OF FIX ---
 
 // Root route for backend
