@@ -8,8 +8,9 @@ import axios from "axios";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { ElevenLabsClient } from "elevenlabs";
 import { WebSocket as WsClient } from "ws";
-import FormData from 'form-data';
-import fetch from 'node-fetch';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
 
 // Load environment variables
 dotenv.config();
@@ -55,78 +56,76 @@ app.use(
 app.use(express.json());
 
 // websocket handler
-
 app.ws("/api/voice/stream", (ws, req) => {
   console.log("Client connected to server WebSocket");
   
+  // Initialize ElevenLabs client
+  const elevenlabs = new ElevenLabsClient({
+    apiKey: process.env.ELEVENLABS_API_KEY
+  });
+  
   // Buffer to collect audio chunks
-  let audioBuffer = [];
+  let audioChunks = [];
   let isProcessing = false;
   
   // Configuration
-  const BUFFER_SIZE_THRESHOLD = 16384; // Process when buffer reaches this size (in bytes)
-  const BUFFER_TIME_THRESHOLD = 2000; // Or process every 2 seconds
-  let bufferTimer = null;
+  const CHUNK_COUNT_THRESHOLD = 10; // Process every N chunks
+  const MAX_WAIT_TIME = 3000; // Or process every 3 seconds
+  let chunkTimer = null;
+  let chunkCount = 0;
   
-  // Function to process accumulated audio
-  async function processAudioBuffer() {
-    if (audioBuffer.length === 0 || isProcessing) return;
+  // Function to process accumulated audio chunks
+  async function processAudioChunks() {
+    if (audioChunks.length === 0 || isProcessing) return;
     
     isProcessing = true;
-    console.log(`Processing ${audioBuffer.length} audio chunks`);
+    console.log(`Processing ${audioChunks.length} audio chunks`);
     
     try {
       // Combine all audio chunks into a single buffer
-      const combinedBuffer = Buffer.concat(audioBuffer);
+      const combinedBuffer = Buffer.concat(audioChunks.map(chunk => Buffer.from(chunk)));
       
-      // Clear the buffer for new audio
-      audioBuffer = [];
-      
-      // Create form data for ElevenLabs API
-      const formData = new FormData();
-      
-      // Try to determine the actual audio format
       console.log(`Combined buffer size: ${combinedBuffer.length} bytes`);
-      console.log(`First few bytes:`, combinedBuffer.slice(0, 10));
       
-      // For raw audio data, we might need to specify the format differently
-      formData.append('file', combinedBuffer, {
-        filename: 'audio.webm', // or try 'audio.wav', 'audio.mp3' depending on your client
-        contentType: 'audio/webm' // adjust this based on what your client is sending
-      });
-      formData.append('model_id', 'scribe_v1');
+      // Clear chunks for next batch
+      audioChunks = [];
+      chunkCount = 0;
       
-      // Optional parameters
-      formData.append('language_code', 'en'); // Adjust as needed
-      formData.append('speaker_diarization', 'false');
-      formData.append('audio_events', 'false');
+      // Create a temporary file
+      const tempDir = os.tmpdir();
+      const tempFileName = `audio_${Date.now()}.webm`;
+      const tempFilePath = path.join(tempDir, tempFileName);
       
-      // Send to ElevenLabs HTTP API
-      const response = await fetch('https://api.elevenlabs.io/v1/speech-to-text', {
-        method: 'POST',
-        headers: {
-          'xi-api-key': process.env.ELEVENLABS_API_KEY,
-          ...formData.getHeaders()
-        },
-        body: formData
-      });
+      // Write buffer to temporary file
+      fs.writeFileSync(tempFilePath, combinedBuffer);
       
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`ElevenLabs API error details:`, errorText);
-        throw new Error(`ElevenLabs API error: ${response.status} ${response.statusText} - ${errorText}`);
-      }
-      
-      const result = await response.json();
-      
-      // Send transcription back to client
-      if (ws.readyState === ws.OPEN && result.text) {
-        ws.send(JSON.stringify({
-          type: 'transcription',
-          text: result.text,
-          language: result.detected_language,
-          confidence: result.confidence
-        }));
+      try {
+        // Use ElevenLabs SDK to transcribe
+        const transcription = await elevenlabs.speechToText.convert({
+          audio: fs.createReadStream(tempFilePath),
+          model_id: "scribe_v1",
+          language_code: "en" // Adjust as needed
+        });
+        
+        // Send transcription back to client
+        if (ws.readyState === ws.OPEN && transcription.text) {
+          ws.send(JSON.stringify({
+            type: 'transcription',
+            text: transcription.text.trim(),
+            language: transcription.detected_language,
+            confidence: transcription.confidence
+          }));
+          
+          console.log('Transcription:', transcription.text.trim());
+        }
+        
+      } finally {
+        // Clean up temporary file
+        try {
+          fs.unlinkSync(tempFilePath);
+        } catch (cleanupError) {
+          console.warn('Failed to cleanup temp file:', cleanupError);
+        }
       }
       
     } catch (error) {
@@ -134,7 +133,7 @@ app.ws("/api/voice/stream", (ws, req) => {
       if (ws.readyState === ws.OPEN) {
         ws.send(JSON.stringify({
           type: 'error',
-          message: 'Failed to process audio'
+          message: 'Failed to process audio: ' + error.message
         }));
       }
     } finally {
@@ -145,26 +144,24 @@ app.ws("/api/voice/stream", (ws, req) => {
   // Handle incoming audio data from client
   ws.onmessage = (msg) => {
     try {
-      // Add audio chunk to buffer
-      audioBuffer.push(Buffer.from(msg.data));
+      // Add audio chunk to collection
+      audioChunks.push(msg.data);
+      chunkCount++;
       
-      // Calculate total buffer size
-      const totalBufferSize = audioBuffer.reduce((sum, chunk) => sum + chunk.length, 0);
-      
-      // Process if buffer is large enough
-      if (totalBufferSize >= BUFFER_SIZE_THRESHOLD) {
-        if (bufferTimer) {
-          clearTimeout(bufferTimer);
-          bufferTimer = null;
+      // Process if we have enough chunks
+      if (chunkCount >= CHUNK_COUNT_THRESHOLD) {
+        if (chunkTimer) {
+          clearTimeout(chunkTimer);
+          chunkTimer = null;
         }
-        processAudioBuffer();
+        processAudioChunks();
       } else {
-        // Set timer to process buffer after time threshold
-        if (!bufferTimer) {
-          bufferTimer = setTimeout(() => {
-            bufferTimer = null;
-            processAudioBuffer();
-          }, BUFFER_TIME_THRESHOLD);
+        // Set timer to process chunks after max wait time
+        if (!chunkTimer) {
+          chunkTimer = setTimeout(() => {
+            chunkTimer = null;
+            processAudioChunks();
+          }, MAX_WAIT_TIME);
         }
       }
       
@@ -178,14 +175,14 @@ app.ws("/api/voice/stream", (ws, req) => {
     console.log("Client disconnected from server WebSocket");
     
     // Clear any pending timer
-    if (bufferTimer) {
-      clearTimeout(bufferTimer);
-      bufferTimer = null;
+    if (chunkTimer) {
+      clearTimeout(chunkTimer);
+      chunkTimer = null;
     }
     
-    // Process any remaining audio in buffer
-    if (audioBuffer.length > 0) {
-      processAudioBuffer();
+    // Process any remaining audio chunks
+    if (audioChunks.length > 0) {
+      processAudioChunks();
     }
   };
   
@@ -197,7 +194,7 @@ app.ws("/api/voice/stream", (ws, req) => {
   // Send initial connection confirmation
   ws.send(JSON.stringify({
     type: 'connected',
-    message: 'Connected to speech-to-text service'
+    message: 'Connected to ElevenLabs speech-to-text service'
   }));
 });
 // --- END OF FIX ---
