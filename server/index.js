@@ -146,7 +146,7 @@ app.ws("/api/voice/stream", (ws, req) => {
           return res.json();
       } 
           
-        const transcription = await res.json();
+        const transcription = await callStt(tempFilePath);
         
         // Send transcription back to clien
         if (ws.readyState === ws.OPEN && transcription.text) {
