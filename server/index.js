@@ -132,7 +132,7 @@ app.ws("/api/voice/stream", (ws, req) => {
               headers: {
                 ...form.getHeaders(), 
                 "xi-api-key": process.env.ELEVENLABS_API_KEY,
-                "Content-Length": length,  // length
+                "Content-Length": length,  // lengt
               },
               body: form,
               bodyTimeout: 120_000,
@@ -143,8 +143,8 @@ app.ws("/api/voice/stream", (ws, req) => {
           if (!res.ok) {
             throw new Error(`STT API error: ${res.status} ${await res.text()}`);
           }
-      //     return res.json();
-      // } 
+          return res.json();
+      } 
           
         const transcription = await res.json();
         
