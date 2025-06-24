@@ -8,6 +8,8 @@ import axios from "axios";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { ElevenLabsClient } from "elevenlabs";
 import { WebSocket as WsClient } from "ws";
+import FormData from 'form-data';
+import fetch from 'node-fetch';
 
 // Load environment variables
 dotenv.config();
@@ -52,54 +54,143 @@ app.use(
 );
 app.use(express.json());
 
+// websocket handler
 app.ws("/api/voice/stream", (ws, req) => {
   console.log("Client connected to server WebSocket");
-
-  // 1) open the **correct** ElevenLabs socket
-  const elSocket = new WsClient(
-    "wss://api.elevenlabs.io/v1/streaming/speech-to-text",
-    { headers: { "xi-api-key": process.env.ELEVENLABS_API_KEY } }
-  );
-
-  // 2) once open, send the model selection as JSON
-  elSocket.onopen = () => {
-    console.log("✅ Connected to ElevenLabs STT socket");
-    elSocket.send(JSON.stringify({
-      model_id: "eleven_multilingual_v2",
-      // (you can add any other config fields here)
-    }));
-  };
-
-  // 3) forward audio from client to ElevenLabs
+  
+  // Buffer to collect audio chunks
+  let audioBuffer = [];
+  let isProcessing = false;
+  
+  // Configuration
+  const BUFFER_SIZE_THRESHOLD = 16384; // Process when buffer reaches this size (in bytes)
+  const BUFFER_TIME_THRESHOLD = 2000; // Or process every 2 seconds
+  let bufferTimer = null;
+  
+  // Function to process accumulated audio
+  async function processAudioBuffer() {
+    if (audioBuffer.length === 0 || isProcessing) return;
+    
+    isProcessing = true;
+    console.log(`Processing ${audioBuffer.length} audio chunks`);
+    
+    try {
+      // Combine all audio chunks into a single buffer
+      const combinedBuffer = Buffer.concat(audioBuffer);
+      
+      // Clear the buffer for new audio
+      audioBuffer = [];
+      
+      // Create form data for ElevenLabs API
+      const formData = new FormData();
+      formData.append('audio', combinedBuffer, {
+        filename: 'audio.wav',
+        contentType: 'audio/wav'
+      });
+      formData.append('model_id', 'scribe_v1');
+      
+      // Optional parameters
+      formData.append('language_code', 'en'); // Adjust as needed
+      formData.append('speaker_diarization', 'false');
+      formData.append('audio_events', 'false');
+      
+      // Send to ElevenLabs HTTP API
+      const response = await fetch('https://api.elevenlabs.io/v1/speech-to-text', {
+        method: 'POST',
+        headers: {
+          'xi-api-key': process.env.ELEVENLABS_API_KEY,
+          ...formData.getHeaders()
+        },
+        body: formData
+      });
+      
+      if (!response.ok) {
+        throw new Error(`ElevenLabs API error: ${response.status} ${response.statusText}`);
+      }
+      
+      const result = await response.json();
+      
+      // Send transcription back to client
+      if (ws.readyState === ws.OPEN && result.text) {
+        ws.send(JSON.stringify({
+          type: 'transcription',
+          text: result.text,
+          language: result.detected_language,
+          confidence: result.confidence
+        }));
+      }
+      
+    } catch (error) {
+      console.error('Error processing audio:', error);
+      if (ws.readyState === ws.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'error',
+          message: 'Failed to process audio'
+        }));
+      }
+    } finally {
+      isProcessing = false;
+    }
+  }
+  
+  // Handle incoming audio data from client
   ws.onmessage = (msg) => {
-    if (elSocket.readyState === WsClient.OPEN) {
-      elSocket.send(msg.data);
+    try {
+      // Add audio chunk to buffer
+      audioBuffer.push(Buffer.from(msg.data));
+      
+      // Calculate total buffer size
+      const totalBufferSize = audioBuffer.reduce((sum, chunk) => sum + chunk.length, 0);
+      
+      // Process if buffer is large enough
+      if (totalBufferSize >= BUFFER_SIZE_THRESHOLD) {
+        if (bufferTimer) {
+          clearTimeout(bufferTimer);
+          bufferTimer = null;
+        }
+        processAudioBuffer();
+      } else {
+        // Set timer to process buffer after time threshold
+        if (!bufferTimer) {
+          bufferTimer = setTimeout(() => {
+            bufferTimer = null;
+            processAudioBuffer();
+          }, BUFFER_TIME_THRESHOLD);
+        }
+      }
+      
+    } catch (error) {
+      console.error('Error handling audio message:', error);
     }
   };
-
-  // 4) relay transcripts back to client
-  elSocket.onmessage = (evt) => {
-    if (ws.readyState === WsClient.OPEN) {
-      ws.send(evt.data);
-    }
-  };
-
-  // 5) errors/closes clean up both sockets
-  elSocket.onerror = (err) => {
-    console.error("ElevenLabs error:", err);
-    ws.close(1011, "ElevenLabs STT failed");
-  };
-  elSocket.onclose = (ev) => {
-    console.log("ElevenLabs socket closed:", ev.code, ev.reason);
-    if (ws.readyState === WsClient.OPEN) ws.close(ev.code, ev.reason);
-  };
+  
+  // Handle client disconnect
   ws.onclose = () => {
-    if (elSocket.readyState === WsClient.OPEN) {
-      elSocket.close(1000, "client disconnected");
+    console.log("Client disconnected from server WebSocket");
+    
+    // Clear any pending timer
+    if (bufferTimer) {
+      clearTimeout(bufferTimer);
+      bufferTimer = null;
+    }
+    
+    // Process any remaining audio in buffer
+    if (audioBuffer.length > 0) {
+      processAudioBuffer();
     }
   };
+  
+  // Handle WebSocket errors
+  ws.onerror = (error) => {
+    console.error('WebSocket error:', error);
+  };
+  
+  // Send initial connection confirmation
+  ws.send(JSON.stringify({
+    type: 'connected',
+    message: 'Connected to speech-to-text service'
+  }));
 });
-
 // --- END OF FIX ---
 
 // Root route for backend
