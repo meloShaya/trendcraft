@@ -15,6 +15,7 @@ import fs from "fs";
 // import fetch from "node-fetch";
 // import FormData from "form-data";
 import { fetch, FormData } from "undici";
+import { Blob } from "buffer"; 
 
 // Load environment variables
 dotenv.config();
@@ -110,12 +111,12 @@ app.ws("/api/voice/stream", (ws, req) => {
       fs.writeFileSync(tempFilePath, combinedBuffer);
       
       try {
-        // async function callStt(tempFilePath) {
+        async function callStt(tempFilePath) {
+          const fileBuffer = fs.readFileSync(tempFilePath);
           const form = new FormData();
-          form.append("file", fs.createReadStream(tempFilePath), {
-            filename: "audio.webm",
-            contentType: "audio/webm"
-          });
+          form.append("file", new Blob([fileBuffer], { type: "audio/webm" }),
+                      "audio.webm"
+          );
           form.append("model_id", "scribe_v1");
           form.append("language_code", "en");
 
