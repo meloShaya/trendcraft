@@ -8,9 +8,12 @@ import axios from "axios";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { ElevenLabsClient } from "elevenlabs";
 import { WebSocket as WsClient } from "ws";
-import * as fs from "fs";
+// import * as fs from "fs";
 import path from 'path';
 import os from 'os';
+import fs from "fs";
+import fetch from "node-fetch";
+import FormData from "form-data";
 
 // Load environment variables
 dotenv.config();
@@ -106,12 +109,33 @@ app.ws("/api/voice/stream", (ws, req) => {
       fs.writeFileSync(tempFilePath, combinedBuffer);
       
       try {
-        // Use ElevenLabs SDK to transcribe
-        const transcription = await elevenlabs.speechToText.convert({
-          audio: fs.createReadStream(tempFilePath),
-          model_id: "scribe_v1",
-          language_code: "en" // Adjust as needed
-        });
+              
+        async function transcribe(tempFilePath) {
+          const form = new FormData();
+          form.append("file", fs.createReadStream(tempFilePath), {
+            filename: "audio.webm",
+            contentType: "audio/webm"
+          });
+          form.append("model_id", "scribe_v1");
+          form.append("language_code", "eng");
+        
+          const res = await fetch(
+            "https://api.elevenlabs.io/v1/speech-to-text/convert",
+            {
+              method: "POST",
+              headers: {
+                "xi-api-key": process.env.ELEVENLABS_API_KEY
+              },
+              body: form
+            }
+          );
+        
+          if (!res.ok) {
+            throw new Error(`STT API error: ${res.status} ${await res.text()}`);
+          }
+          return res.json();
+        }
+
         
         // Send transcription back to client
         if (ws.readyState === ws.OPEN && transcription.text) {
