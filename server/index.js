@@ -66,29 +66,28 @@ app.ws("/api/voice/stream", (ws, req) => {
   const elevenlabs = new ElevenLabsClient({
     apiKey: process.env.ELEVENLABS_API_KEY,
     enable: {
-    stt: true  // <--- IMPORTANT!
-  }
+      stt: true
+    }
   });
 
-  //debug
-  console.log("ElevenLabsClient keys:", Object.keys(elevenlabs));
-  
   // Buffer to collect audio chunks
   let audioChunks = [];
   let isProcessing = false;
   
   // Configuration
-  const CHUNK_COUNT_THRESHOLD = 10; // Process every N chunks
-  const MAX_WAIT_TIME = 3000; // Or process every 3 seconds
+  const CHUNK_COUNT_THRESHOLD = 10;
+  const MAX_WAIT_TIME = 3000;
+  const MIN_BUFFER_SIZE = 1024; // Minimum buffer size in bytes
+  const MAX_RETRIES = 3;
   let chunkTimer = null;
   let chunkCount = 0;
   
-  // Function to process accumulated audio chunks
-  async function processAudioChunks() {
+  // Function to process accumulated audio chunks with retry logic
+  async function processAudioChunks(retryCount = 0) {
     if (audioChunks.length === 0 || isProcessing) return;
     
     isProcessing = true;
-    console.log(`Processing ${audioChunks.length} audio chunks`);
+    console.log(`Processing ${audioChunks.length} audio chunks (attempt ${retryCount + 1})`);
     
     try {
       // Combine all audio chunks into a single buffer
@@ -96,50 +95,70 @@ app.ws("/api/voice/stream", (ws, req) => {
       
       console.log(`Combined buffer size: ${combinedBuffer.length} bytes`);
       
+      // Check if buffer is large enough to process
+      if (combinedBuffer.length < MIN_BUFFER_SIZE) {
+        console.log(`Buffer too small (${combinedBuffer.length} bytes), skipping processing`);
+        isProcessing = false;
+        return;
+      }
+      
       // Clear chunks for next batch
       audioChunks = [];
       chunkCount = 0;
       
       // Create a temporary file
       const tempDir = os.tmpdir();
-      const tempFileName = `audio_${Date.now()}.webm`;
+      const tempFileName = `audio_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.webm`;
       const tempFilePath = path.join(tempDir, tempFileName);
       
       // Write buffer to temporary file
       fs.writeFileSync(tempFilePath, combinedBuffer);
       
       try {
-          const form = new FormData();
-          form.append("file", fs.createReadStream(tempFilePath), {
-            filename: "audio.webm",
-            contentType: "audio/webm"
-          });
-          form.append("model_id", "scribe_v1");
-          form.append("language_code", "en");
+        const form = new FormData();
+        const fileStream = fs.createReadStream(tempFilePath);
+        
+        form.append("file", fileStream, {
+          filename: "audio.webm",
+          contentType: "audio/webm"
+        });
+        form.append("model_id", "scribe_v1");
+        form.append("language_code", "en");
 
-        // compute length
-          const length = await new Promise((resolve, reject) => {
-            form.getLength((err, len) => err ? reject(err) : resolve(len));
-          });
+        // Get form length
+        const length = await new Promise((resolve, reject) => {
+          form.getLength((err, len) => err ? reject(err) : resolve(len));
+        });
         
-          const res = await fetch(
-            "https://api.elevenlabs.io/v1/speech-to-text/",
-            {
-              method: "POST",
-              headers: {
-                ...form.getHeaders(), 
-                "xi-api-key": process.env.ELEVENLABS_API_KEY,
-                "Content-Length": length,  // length
-              },
-              body: form,
-              timeout: 120_000,
-            }
-          );
+        console.log(`Sending request with Content-Length: ${length}`);
         
-          if (!res.ok) {
-            throw new Error(`STT API error: ${res.status} ${await res.text()}`);
+        // Create AbortController for timeout handling
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+        
+        const res = await fetch(
+          "https://api.elevenlabs.io/v1/speech-to-text/",
+          {
+            method: "POST",
+            headers: {
+              ...form.getHeaders(),
+              "xi-api-key": process.env.ELEVENLABS_API_KEY,
+              "Content-Length": length.toString(),
+              "User-Agent": "Node.js Speech-to-Text Client",
+              "Accept": "application/json"
+            },
+            body: form,
+            signal: controller.signal
           }
-          
+        );
+        
+        clearTimeout(timeoutId);
+        
+        if (!res.ok) {
+          const errorText = await res.text();
+          throw new Error(`STT API error: ${res.status} ${res.statusText} - ${errorText}`);
+        }
+        
         const transcription = await res.json();
         
         // Send transcription back to client
@@ -147,28 +166,46 @@ app.ws("/api/voice/stream", (ws, req) => {
           ws.send(JSON.stringify({
             type: 'transcription',
             text: transcription.text.trim(),
-            language: transcription.detected_language,
-            confidence: transcription.confidence
+            language: transcription.detected_language || 'en',
+            confidence: transcription.confidence || 0
           }));
           
           console.log('Transcription:', transcription.text.trim());
         }
         
       } finally {
-        // Clean up temporary fil
+        // Clean up temporary file
         try {
-          fs.unlinkSync(tempFilePath);
+          if (fs.existsSync(tempFilePath)) {
+            fs.unlinkSync(tempFilePath);
+          }
         } catch (cleanupError) {
           console.warn('Failed to cleanup temp file:', cleanupError);
         }
       }
       
     } catch (error) {
-      console.error('Error processing audio:', error);
+      console.error(`Error processing audio (attempt ${retryCount + 1}):`, error);
+      
+      // Retry logic for network errors
+      if (retryCount < MAX_RETRIES && (
+        error.code === 'ECONNRESET' || 
+        error.code === 'ENOTFOUND' || 
+        error.code === 'ETIMEDOUT' ||
+        error.name === 'AbortError'
+      )) {
+        console.log(`Retrying in ${(retryCount + 1) * 1000}ms...`);
+        setTimeout(() => {
+          processAudioChunks(retryCount + 1);
+        }, (retryCount + 1) * 1000);
+        return;
+      }
+      
+      // Send error to client if all retries failed
       if (ws.readyState === ws.OPEN) {
         ws.send(JSON.stringify({
           type: 'error',
-          message: 'Failed to process audio: ' + error.message
+          message: `Failed to process audio after ${retryCount + 1} attempts: ${error.message}`
         }));
       }
     } finally {
@@ -179,9 +216,17 @@ app.ws("/api/voice/stream", (ws, req) => {
   // Handle incoming audio data from client
   ws.onmessage = (msg) => {
     try {
+      // Validate message data
+      if (!msg.data || msg.data.length === 0) {
+        console.warn('Received empty audio chunk, skipping');
+        return;
+      }
+      
       // Add audio chunk to collection
       audioChunks.push(msg.data);
       chunkCount++;
+      
+      console.log(`Received chunk ${chunkCount}, size: ${msg.data.length} bytes`);
       
       // Process if we have enough chunks
       if (chunkCount >= CHUNK_COUNT_THRESHOLD) {
@@ -202,6 +247,12 @@ app.ws("/api/voice/stream", (ws, req) => {
       
     } catch (error) {
       console.error('Error handling audio message:', error);
+      if (ws.readyState === ws.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'error',
+          message: 'Error processing audio chunk: ' + error.message
+        }));
+      }
     }
   };
   
@@ -215,8 +266,9 @@ app.ws("/api/voice/stream", (ws, req) => {
       chunkTimer = null;
     }
     
-    // Process any remaining audio chunks
-    if (audioChunks.length > 0) {
+    // Process any remaining audio chunks if we're not already processing
+    if (audioChunks.length > 0 && !isProcessing) {
+      console.log('Processing remaining audio chunks before disconnect');
       processAudioChunks();
     }
   };
@@ -224,13 +276,21 @@ app.ws("/api/voice/stream", (ws, req) => {
   // Handle WebSocket errors
   ws.onerror = (error) => {
     console.error('WebSocket error:', error);
+    
+    // Clear any pending timer
+    if (chunkTimer) {
+      clearTimeout(chunkTimer);
+      chunkTimer = null;
+    }
   };
   
   // Send initial connection confirmation
-  ws.send(JSON.stringify({
-    type: 'connected',
-    message: 'Connected to ElevenLabs speech-to-text service'
-  }));
+  if (ws.readyState === ws.OPEN) {
+    ws.send(JSON.stringify({
+      type: 'connected',
+      message: 'Connected to ElevenLabs speech-to-text service'
+    }));
+  }
 });
 // --- END OF FIX ---
 
