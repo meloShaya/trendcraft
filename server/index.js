@@ -12,18 +12,17 @@ import { WebSocket as WsClient } from "ws";
 import path from 'path';
 import os from 'os';
 import fs from "fs";
-
-
-import { createFFmpeg } from "@ffmpeg/ffmpeg"; // <-- Import the new library
-
 import { Buffer } from "buffer";
 import fetch from "node-fetch";
 import { FormData, Blob } from "formdata-node";
 
-// Note: Ensure you have installed the necessary packages:
-// npm install elevenlabs @ffmpeg/ffmpeg formdata-node node-fetch
 
-// ffmpeg.setFfmpegPath(ffmpegStatic);
+import { FFmpeg } from '@ffmpeg/ffmpeg'; // <-- Corrected import
+import { fetchFile } from "@ffmpeg/util"; // <-- Utility to fetch core
+
+
+// Note: Ensure you have installed the necessary packages:
+// npm install elevenlabs @ffmpeg/ffmpeg @ffmpeg/util formdata-node node-fetch
 
 // Load environment variable
 dotenv.config();
@@ -69,21 +68,28 @@ app.use(
 app.use(express.json());
 
 // websocket handler
+
+
 // --- WebSocket Endpoint ---
 app.ws("/api/voice/stream", async (ws, req) => {
     console.log("Client connected to server WebSocket");
 
     // --- FFmpeg and ElevenLabs Client Initialization ---
-    // Initialize FFmpeg instance. We do this once per connection.
-    // It's created with empty 'corePath' to use the default CDN.
-    const ffmpeg = createFFmpeg({ log: true });
+    // Initialize FFmpeg instance using the new class-based approach.
+    const ffmpeg = new FFmpeg();
+    ffmpeg.setLogging(true);
     let isFFmpegLoaded = false;
 
     // Asynchronously load the FFmpeg core.
     const loadFFmpeg = async () => {
         if (!isFFmpegLoaded) {
             try {
-                await ffmpeg.load();
+                // The new API requires loading the core explicitly.
+                // Using a CDN URL for the core is recommended for serverless environments.
+                const coreURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.js'
+                await ffmpeg.load({
+                    coreURL: await fetchFile(coreURL)
+                });
                 isFFmpegLoaded = true;
                 console.log("FFmpeg core loaded successfully.");
             } catch (e) {
@@ -126,23 +132,23 @@ app.ws("/api/voice/stream", async (ws, req) => {
         console.log(`Starting transcoding: ${inputFileName} -> ${outputFileName}`);
 
         // Write the input buffer to FFmpeg's virtual file system
-        ffmpeg.FS("writeFile", inputFileName, new Uint8Array(webmBuffer));
+        await ffmpeg.writeFile(inputFileName, new Uint8Array(webmBuffer));
 
         // Run the FFmpeg command to transcode the file
         // -i: input file
         // -acodec pcm_s16le: output codec (16-bit PCM, standard for WAV)
         // -f wav: output format
-        await ffmpeg.run("-i", inputFileName, "-acodec", "pcm_s16le", "-f", "wav", outputFileName);
+        await ffmpeg.exec(["-i", inputFileName, "-acodec", "pcm_s16le", "-f", "wav", outputFileName]);
 
         // Read the resulting WAV file from the virtual file system
-        const outputData = ffmpeg.FS("readFile", outputFileName);
+        const outputData = await ffmpeg.readFile(outputFileName);
 
         // Clean up the virtual files
-        ffmpeg.FS("unlink", inputFileName);
-        ffmpeg.FS("unlink", outputFileName);
+        await ffmpeg.deleteFile(inputFileName);
+        await ffmpeg.deleteFile(outputFileName);
 
         console.log("Transcoding finished.");
-        return Buffer.from(outputData.buffer); // Convert Uint8Array to Node.js Buffer
+        return Buffer.from(outputData); // Convert Uint8Array to Node.js Buffer
     }
 
 
@@ -254,6 +260,7 @@ app.ws("/api/voice/stream", async (ws, req) => {
         message: 'Connected to speech-to-text service'
     }));
 });
+
 
 // --- END OF FIX ---
 
