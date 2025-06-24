@@ -62,6 +62,9 @@ app.ws("/api/voice/stream", (ws, req) => {
   // Initialize ElevenLabs client
   const elevenlabs = new ElevenLabsClient({
     apiKey: process.env.ELEVENLABS_API_KEY
+    enable: {
+    stt: true  // <--- IMPORTANT!
+  }
   });
   
   // Buffer to collect audio chunks
