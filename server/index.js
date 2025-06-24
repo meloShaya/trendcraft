@@ -108,9 +108,7 @@ app.ws("/api/voice/stream", (ws, req) => {
       // Write buffer to temporary file
       fs.writeFileSync(tempFilePath, combinedBuffer);
       
-      try {
-              
-        async function transcribe(tempFilePath) {
+      try 
           const form = new FormData();
           form.append("file", fs.createReadStream(tempFilePath), {
             filename: "audio.webm",
@@ -135,7 +133,6 @@ app.ws("/api/voice/stream", (ws, req) => {
           }
           
         const transcription = await res.json();
-
         
         // Send transcription back to client
         if (ws.readyState === ws.OPEN && transcription.text) {
