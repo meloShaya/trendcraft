@@ -129,7 +129,7 @@ app.ws("/api/voice/stream", (ws, req) => {
               headers: {
                 ...form.getHeaders(), 
                 "xi-api-key": process.env.ELEVENLABS_API_KEY,
-                "Content-Length": length, 
+                "Content-Length": length,  // length
               },
               body: form,
               timeout: 120_000,
