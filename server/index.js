@@ -55,6 +55,7 @@ app.use(
 app.use(express.json());
 
 // websocket handler
+
 app.ws("/api/voice/stream", (ws, req) => {
   console.log("Client connected to server WebSocket");
   
@@ -83,9 +84,15 @@ app.ws("/api/voice/stream", (ws, req) => {
       
       // Create form data for ElevenLabs API
       const formData = new FormData();
-      formData.append('audio', combinedBuffer, {
-        filename: 'audio.wav',
-        contentType: 'audio/wav'
+      
+      // Try to determine the actual audio format
+      console.log(`Combined buffer size: ${combinedBuffer.length} bytes`);
+      console.log(`First few bytes:`, combinedBuffer.slice(0, 10));
+      
+      // For raw audio data, we might need to specify the format differently
+      formData.append('file', combinedBuffer, {
+        filename: 'audio.webm', // or try 'audio.wav', 'audio.mp3' depending on your client
+        contentType: 'audio/webm' // adjust this based on what your client is sending
       });
       formData.append('model_id', 'scribe_v1');
       
@@ -105,7 +112,9 @@ app.ws("/api/voice/stream", (ws, req) => {
       });
       
       if (!response.ok) {
-        throw new Error(`ElevenLabs API error: ${response.status} ${response.statusText}`);
+        const errorText = await response.text();
+        console.error(`ElevenLabs API error details:`, errorText);
+        throw new Error(`ElevenLabs API error: ${response.status} ${response.statusText} - ${errorText}`);
       }
       
       const result = await response.json();
