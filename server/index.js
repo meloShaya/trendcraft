@@ -12,9 +12,9 @@ import { WebSocket as WsClient } from "ws";
 import path from 'path';
 import os from 'os';
 import fs from "fs";
-import fetch from "node-fetch";
+// import fetch from "node-fetch";
 // import FormData from "form-data";
-import FormData from "undici";
+import { fetch, FormData } from "undici";
 
 // Load environment variables
 dotenv.config();
@@ -110,6 +110,7 @@ app.ws("/api/voice/stream", (ws, req) => {
       fs.writeFileSync(tempFilePath, combinedBuffer);
       
       try {
+        async function callStt(tempFilePath) {
           const form = new FormData();
           form.append("file", fs.createReadStream(tempFilePath), {
             filename: "audio.webm",
@@ -141,8 +142,10 @@ app.ws("/api/voice/stream", (ws, req) => {
           if (!res.ok) {
             throw new Error(`STT API error: ${res.status} ${await res.text()}`);
           }
+          return res.json();
+      }
           
-        const transcription = await res.json();
+        const transcription = await callStt(tempFilePath);
         
         // Send transcription back to client
         if (ws.readyState === ws.OPEN && transcription.text) {
