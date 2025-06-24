@@ -62,14 +62,6 @@ app.use(express.json());
 app.ws("/api/voice/stream", (ws, req) => {
   console.log("Client connected to server WebSocket");
   
-  // Initialize ElevenLabs client
-  const elevenlabs = new ElevenLabsClient({
-    apiKey: process.env.ELEVENLABS_API_KEY,
-    enable: {
-      stt: true
-    }
-  });
-
   // Buffer to collect audio chunks
   let audioChunks = [];
   let isProcessing = false;
@@ -77,12 +69,117 @@ app.ws("/api/voice/stream", (ws, req) => {
   // Configuration
   const CHUNK_COUNT_THRESHOLD = 10;
   const MAX_WAIT_TIME = 3000;
-  const MIN_BUFFER_SIZE = 1024; // Minimum buffer size in bytes
+  const MIN_BUFFER_SIZE = 1024;
   const MAX_RETRIES = 3;
   let chunkTimer = null;
   let chunkCount = 0;
   
-  // Function to process accumulated audio chunks with retry logic
+  // Function to create multipart form data manually
+  function createMultipartFormData(audioBuffer, boundary) {
+    const CRLF = '\r\n';
+    const delimiter = `--${boundary}`;
+    const closeDelimiter = `--${boundary}--`;
+    
+    let body = Buffer.alloc(0);
+    
+    // Add file field
+    const fileHeader = [
+      delimiter,
+      'Content-Disposition: form-data; name="file"; filename="audio.webm"',
+      'Content-Type: audio/webm',
+      '',
+      ''
+    ].join(CRLF);
+    
+    body = Buffer.concat([
+      body,
+      Buffer.from(fileHeader, 'utf8'),
+      audioBuffer,
+      Buffer.from(CRLF, 'utf8')
+    ]);
+    
+    // Add model_id field
+    const modelHeader = [
+      delimiter,
+      'Content-Disposition: form-data; name="model_id"',
+      '',
+      'scribe_v1'
+    ].join(CRLF);
+    
+    body = Buffer.concat([
+      body,
+      Buffer.from(modelHeader + CRLF, 'utf8')
+    ]);
+    
+    // Add language_code field
+    const langHeader = [
+      delimiter,
+      'Content-Disposition: form-data; name="language_code"',
+      '',
+      'en'
+    ].join(CRLF);
+    
+    body = Buffer.concat([
+      body,
+      Buffer.from(langHeader + CRLF, 'utf8')
+    ]);
+    
+    // Close multipart
+    body = Buffer.concat([
+      body,
+      Buffer.from(closeDelimiter + CRLF, 'utf8')
+    ]);
+    
+    return body;
+  }
+  
+  // Alternative approach using axios instead of fetch
+  async function processAudioWithAxios(audioBuffer, retryCount = 0) {
+    const axios = require('axios');
+    const FormData = require('form-data');
+    
+    try {
+      // Create form data
+      const form = new FormData();
+      form.append('file', audioBuffer, {
+        filename: 'audio.webm',
+        contentType: 'audio/webm'
+      });
+      form.append('model_id', 'scribe_v1');
+      form.append('language_code', 'en');
+      
+      const response = await axios.post(
+        'https://api.elevenlabs.io/v1/speech-to-text/',
+        form,
+        {
+          headers: {
+            ...form.getHeaders(),
+            'xi-api-key': process.env.ELEVENLABS_API_KEY,
+          },
+          timeout: 30000,
+          maxContentLength: Infinity,
+          maxBodyLength: Infinity,
+        }
+      );
+      
+      return response.data;
+      
+    } catch (error) {
+      if (retryCount < MAX_RETRIES && (
+        error.code === 'ECONNRESET' || 
+        error.code === 'ENOTFOUND' || 
+        error.code === 'ETIMEDOUT' ||
+        error.code === 'ECONNABORTED'
+      )) {
+        console.log(`Axios retry ${retryCount + 1} in ${(retryCount + 1) * 1000}ms...`);
+        await new Promise(resolve => setTimeout(resolve, (retryCount + 1) * 1000));
+        return processAudioWithAxios(audioBuffer, retryCount + 1);
+      }
+      throw error;
+    }
+  }
+  
+  // Main processing function with multiple approaches
   async function processAudioChunks(retryCount = 0) {
     if (audioChunks.length === 0 || isProcessing) return;
     
@@ -106,98 +203,81 @@ app.ws("/api/voice/stream", (ws, req) => {
       audioChunks = [];
       chunkCount = 0;
       
-      // Create a temporary file
-      const tempDir = os.tmpdir();
-      const tempFileName = `audio_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.webm`;
-      const tempFilePath = path.join(tempDir, tempFileName);
+      let transcription;
       
-      // Write buffer to temporary file
-      fs.writeFileSync(tempFilePath, combinedBuffer);
-      
+      // Try axios approach first (often more reliable)
       try {
-        const form = new FormData();
-        const fileStream = fs.createReadStream(tempFilePath);
+        console.log('Attempting transcription with axios...');
+        transcription = await processAudioWithAxios(combinedBuffer);
+      } catch (axiosError) {
+        console.log('Axios failed, trying manual fetch approach...', axiosError.message);
         
-        form.append("file", fileStream, {
-          filename: "audio.webm",
-          contentType: "audio/webm"
-        });
-        form.append("model_id", "scribe_v1");
-        form.append("language_code", "en");
-
-        // Get form length
-        const length = await new Promise((resolve, reject) => {
-          form.getLength((err, len) => err ? reject(err) : resolve(len));
-        });
+        // Fallback to manual multipart approach
+        const boundary = `----formdata-node-${Math.random().toString(36)}`;
+        const body = createMultipartFormData(combinedBuffer, boundary);
         
-        console.log(`Sending request with Content-Length: ${length}`);
-        
-        // Create AbortController for timeout handling
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+        const timeoutId = setTimeout(() => controller.abort(), 30000);
         
-        const res = await fetch(
-          "https://api.elevenlabs.io/v1/speech-to-text/",
-          {
-            method: "POST",
-            headers: {
-              ...form.getHeaders(),
-              "xi-api-key": process.env.ELEVENLABS_API_KEY,
-              "Content-Length": length.toString(),
-              "User-Agent": "Node.js Speech-to-Text Client",
-              "Accept": "application/json"
-            },
-            body: form,
-            signal: controller.signal
-          }
-        );
-        
-        clearTimeout(timeoutId);
-        
-        if (!res.ok) {
-          const errorText = await res.text();
-          throw new Error(`STT API error: ${res.status} ${res.statusText} - ${errorText}`);
-        }
-        
-        const transcription = await res.json();
-        
-        // Send transcription back to client
-        if (ws.readyState === ws.OPEN && transcription.text) {
-          ws.send(JSON.stringify({
-            type: 'transcription',
-            text: transcription.text.trim(),
-            language: transcription.detected_language || 'en',
-            confidence: transcription.confidence || 0
-          }));
-          
-          console.log('Transcription:', transcription.text.trim());
-        }
-        
-      } finally {
-        // Clean up temporary file
         try {
-          if (fs.existsSync(tempFilePath)) {
-            fs.unlinkSync(tempFilePath);
+          const response = await fetch('https://api.elevenlabs.io/v1/speech-to-text/', {
+            method: 'POST',
+            headers: {
+              'Content-Type': `multipart/form-data; boundary=${boundary}`,
+              'xi-api-key': process.env.ELEVENLABS_API_KEY,
+              'Content-Length': body.length.toString(),
+              'Connection': 'keep-alive',
+              'User-Agent': 'Node.js/STT-Client'
+            },
+            body: body,
+            signal: controller.signal
+          });
+          
+          clearTimeout(timeoutId);
+          
+          if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`STT API error: ${response.status} ${response.statusText} - ${errorText}`);
           }
-        } catch (cleanupError) {
-          console.warn('Failed to cleanup temp file:', cleanupError);
+          
+          transcription = await response.json();
+        } catch (fetchError) {
+          clearTimeout(timeoutId);
+          throw fetchError;
         }
       }
       
+      // Send transcription back to client
+      if (ws.readyState === ws.OPEN && transcription && transcription.text) {
+        ws.send(JSON.stringify({
+          type: 'transcription',
+          text: transcription.text.trim(),
+          language: transcription.detected_language || 'en',
+          confidence: transcription.confidence || 0
+        }));
+        
+        console.log('Transcription successful:', transcription.text.trim());
+      } else if (transcription) {
+        console.log('Empty transcription received');
+      }
+      
     } catch (error) {
-      console.error(`Error processing audio (attempt ${retryCount + 1}):`, error);
+      console.error(`Error processing audio (attempt ${retryCount + 1}):`, error.message);
       
       // Retry logic for network errors
       if (retryCount < MAX_RETRIES && (
         error.code === 'ECONNRESET' || 
         error.code === 'ENOTFOUND' || 
         error.code === 'ETIMEDOUT' ||
-        error.name === 'AbortError'
+        error.code === 'ECONNABORTED' ||
+        error.name === 'AbortError' ||
+        error.message.includes('socket hang up')
       )) {
-        console.log(`Retrying in ${(retryCount + 1) * 1000}ms...`);
+        const delay = Math.min(1000 * Math.pow(2, retryCount), 8000); // Exponential backoff, max 8s
+        console.log(`Retrying in ${delay}ms...`);
         setTimeout(() => {
           processAudioChunks(retryCount + 1);
-        }, (retryCount + 1) * 1000);
+        }, delay);
         return;
       }
       
