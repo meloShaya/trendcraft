@@ -156,17 +156,8 @@ app.ws("/api/voice/stream", (ws, req) => {
           return res.json();
         }
         
-        async function processAudioChunks() {
-          // … combine and write tempFilePath as before …
-          try {
-            const transcription = await callSttWithTranscode(tempFilePath);
-            // send transcription to client…
-          } finally {
-            fs.unlinkSync(tempFilePath);
-            isProcessing = false;
-          }
-        }
-
+        const transcription = await callSttWithTranscode(tempFilePath);
+           
         
         // Send transcription back to clien
         if (ws.readyState === ws.OPEN && transcription.text) {
