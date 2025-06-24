@@ -318,11 +318,18 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated }) => {
                 }
             };
 
-            mediaRecorderRef.current.ondataavailable = (event) => {
+            mediaRecorderRef.current.ondataavailable = async (event) => {
                 if (event.data.size > 0 && sttSocket.readyState === WebSocket.OPEN) {
-                    console.log('Sending audio data, size:', event.data.size);
-                    sttSocket.send(event.data);
-                    resetSilenceTimeout();
+                    try {
+                        console.log('Sending audio data, size:', event.data.size);
+                        // Convert Blob to ArrayBuffer before sending
+                        const arrayBuffer = await event.data.arrayBuffer();
+                        sttSocket.send(arrayBuffer);
+                        resetSilenceTimeout();
+                    } catch (error) {
+                        console.error('Error converting audio data:', error);
+                        addMessage('error', 'Error processing audio data.');
+                    }
                 }
             };
             
