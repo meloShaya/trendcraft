@@ -12,6 +12,8 @@ import { WebSocket as WsClient } from "ws";
 import path from 'path';
 import os from 'os';
 import fs from "fs";
+import ffmpeg from "fluent-ffmpeg";
+import ffmpegStatic from "ffmpeg-static";
 // import fetch from "node-fetch";
 // import FormData from "form-data";
 import { fetch, FormData } from "undici";
@@ -111,36 +113,60 @@ app.ws("/api/voice/stream", (ws, req) => {
       fs.writeFileSync(tempFilePath, combinedBuffer);
       
       try {
-        async function callStt(tempFilePath) {
-          const fileBuffer = fs.readFileSync(tempFilePath);
+        ffmpeg.setFfmpegPath(ffmpegStatic);
+        
+        async function transcodeToWav(inputPath, outputPath) {
+          return new Promise((resolve, reject) => {
+            ffmpeg()
+              .input(inputPath)
+              .inputFormat("webm")
+              .audioCodec("pcm_s16le")
+              .format("wav")
+              .save(outputPath)
+              .on("end", resolve)
+              .on("error", reject);
+          });
+        }
+        
+        async function callSttWithTranscode(tempFilePath) {
+          // 1) Transcode to WAV
+          const wavPath = tempFilePath.replace(/\.webm$/, ".wav");
+          await transcodeToWav(tempFilePath, wavPath);
+        
+          // 2) Read WAV into memory and wrap in a Blob
+          const fileBuffer = fs.readFileSync(wavPath);
           const form = new FormData();
-          form.append("file", new Blob([fileBuffer], { type: "audio/webm" }),
-                      "audio.webm"
-          );
+          form.append("file", new Blob([fileBuffer], { type: "audio/wav" }), "audio.wav");
           form.append("model_id", "scribe_v1");
           form.append("language_code", "en");
-
-               
-          const res = await fetch(
-            "https://api.elevenlabs.io/v1/speech-to-text",
-            {
-              method: "POST",
-              headers: {
-                "xi-api-key": process.env.ELEVENLABS_API_KEY,
-              },
-              body: form,
-              bodyTimeout: 120_000,
-              headersTimeout: 60_000
-            }
-          );
         
+          // 3) POST to ElevenLabs
+          const res = await fetch("https://api.elevenlabs.io/v1/speech-to-text", {
+            method: "POST",
+            headers: { "xi-api-key": process.env.ELEVENLABS_API_KEY },
+            body: form,
+            bodyTimeout: 120_000,
+            headersTimeout: 60_000,
+          });
+        
+          fs.unlinkSync(wavPath);  // cleanup
           if (!res.ok) {
-            throw new Error(`STT API error: ${res.status} ${await res.text()}`);
+            throw new Error(`STT API error: ${res.status} – ${await res.text()}`);
           }
           return res.json();
-      } 
-          
-        const transcription = await callStt(tempFilePath);
+        }
+        
+        async function processAudioChunks() {
+          // … combine and write tempFilePath as before …
+          try {
+            const transcription = await callSttWithTranscode(tempFilePath);
+            // send transcription to client…
+          } finally {
+            fs.unlinkSync(tempFilePath);
+            isProcessing = false;
+          }
+        }
+
         
         // Send transcription back to clien
         if (ws.readyState === ws.OPEN && transcription.text) {
