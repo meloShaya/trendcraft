@@ -19,6 +19,8 @@ import ffmpegStatic from "ffmpeg-static";
 import { fetch, FormData } from "undici";
 import { Blob } from "buffer"; 
 
+ffmpeg.setFfmpegPath(ffmpegStatic);
+
 // Load environment variables
 dotenv.config();
 
@@ -113,7 +115,7 @@ app.ws("/api/voice/stream", (ws, req) => {
       fs.writeFileSync(tempFilePath, combinedBuffer);
       
       try {
-        ffmpeg.setFfmpegPath(ffmpegStatic);
+        // ffmpeg.setFfmpegPath(ffmpegStatic);
         
         async function transcodeToWav(inputPath, outputPath) {
           return new Promise((resolve, reject) => {
