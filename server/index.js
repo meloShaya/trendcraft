@@ -16,8 +16,8 @@ import fs from "fs";
 // import ffmpegStatic from "ffmpeg-static";
 // import fetch from "node-fetch";
 // import FormData from "form-data";
-import { fetch, FormData } from "undici";
-import { Blob } from "buffer"; 
+// import { fetch, FormData } from "undici";
+// import { Blob } from "buffer"; 
 
 import { createFFmpeg } from "@ffmpeg/ffmpeg"; // <-- Import the new library
 
@@ -28,9 +28,9 @@ import { FormData, Blob } from "formdata-node";
 // Note: Ensure you have installed the necessary packages:
 // npm install elevenlabs @ffmpeg/ffmpeg formdata-node node-fetch
 
-ffmpeg.setFfmpegPath(ffmpegStatic);
+// ffmpeg.setFfmpegPath(ffmpegStatic);
 
-// Load environment variables
+// Load environment variable
 dotenv.config();
 
 const app = express();
