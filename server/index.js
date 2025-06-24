@@ -133,8 +133,8 @@ app.ws("/api/voice/stream", (ws, req) => {
           if (!res.ok) {
             throw new Error(`STT API error: ${res.status} ${await res.text()}`);
           }
-          return res.json();
-        }
+          
+        const transcription = await res.json();
 
         
         // Send transcription back to client
