@@ -110,7 +110,7 @@ app.ws("/api/voice/stream", (ws, req) => {
       fs.writeFileSync(tempFilePath, combinedBuffer);
       
       try {
-        async function callStt(tempFilePath) {
+        // async function callStt(tempFilePath) {
           const form = new FormData();
           form.append("file", fs.createReadStream(tempFilePath), {
             filename: "audio.webm",
@@ -142,8 +142,8 @@ app.ws("/api/voice/stream", (ws, req) => {
           if (!res.ok) {
             throw new Error(`STT API error: ${res.status} ${await res.text()}`);
           }
-          return res.json();
-      }
+      //     return res.json();
+      // } 
           
         const transcription = await res.json();
         
