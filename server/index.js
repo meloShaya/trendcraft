@@ -122,13 +122,11 @@ app.ws("/api/voice/stream", (ws, req) => {
 
                
           const res = await fetch(
-            "https://api.elevenlabs.io/v1/speech-to-text/",
+            "https://api.elevenlabs.io/v1/speech-to-text",
             {
               method: "POST",
               headers: {
-                ...form.getHeaders(), 
                 "xi-api-key": process.env.ELEVENLABS_API_KEY,
-                 
               },
               body: form,
               bodyTimeout: 120_000,
