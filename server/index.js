@@ -115,10 +115,10 @@ app.ws("/api/voice/stream", (ws, req) => {
             contentType: "audio/webm"
           });
           form.append("model_id", "scribe_v1");
-          form.append("language_code", "eng");
+          form.append("language_code", "en");
         
           const res = await fetch(
-            "https://api.elevenlabs.io/v1/speech-to-text/convert",
+            "https://api.elevenlabs.io/v1/speech-to-text/",
             {
               method: "POST",
               headers: {
