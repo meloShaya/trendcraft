@@ -16,15 +16,12 @@ import { Buffer } from "buffer";
 import fetch from "node-fetch";
 import { FormData, Blob } from "formdata-node";
 import ffmpeg from "fluent-ffmpeg";
-import ffmpegStatic from "ffmpeg-static"; // <-- Import the ffmpeg-static path
+
+import { spawn } from "child_process"; // <-- Import spawn directly
+import ffmpegStatic from "ffmpeg-static"; // <-- We still need the path
 
 // Note: Ensure you have installed the correct packages for Node.js:
-// npm install elevenlabs fluent-ffmpeg ffmpeg-static formdata-node node-fetch
-
-// Set the path for fluent-ffmpeg to find the executable.
-// This is the crucial step to prevent the 'ENOENT' error.
-ffmpeg.setFfmpegPath(ffmpegStatic);
-
+// npm install elevenlabs ffmpeg-static formdata-node node-fetch
 
 
 // Note: Ensure you have installed the necessary packages:
@@ -73,7 +70,7 @@ app.use(
 );
 app.use(express.json());
 
-// websocket handler
+
 // --- WebSocket Endpoint ---
 app.ws("/api/voice/stream", async (ws, req) => {
     console.log("Client connected to server WebSocket");
@@ -91,7 +88,8 @@ app.ws("/api/voice/stream", async (ws, req) => {
     let chunkTimer = null;
 
     /**
-     * Transcodes a local WEBM file to a local WAV file using ffmpeg.
+     * Transcodes a local WEBM file to a local WAV file using a direct ffmpeg spawn.
+     * This is more robust in environments where fluent-ffmpeg has issues.
      * @param {string} inputPath - The path to the input .webm file.
      * @param {string} outputPath - The path where the output .wav file will be saved.
      * @returns {Promise<void>} A promise that resolves when transcoding is complete.
@@ -99,21 +97,40 @@ app.ws("/api/voice/stream", async (ws, req) => {
     function transcodeToWav(inputPath, outputPath) {
         return new Promise((resolve, reject) => {
             console.log(`Starting transcoding from ${inputPath} to ${outputPath}`);
-            ffmpeg(inputPath)
-                .inputFormat("webm")
-                .audioCodec("pcm_s16le") // Standard 16-bit PCM for WAV
-                .audioFrequency(16000)   // Set sample rate (optional, but good practice for STT)
-                .audioChannels(1)        // Set to mono (optional, but good practice for STT)
-                .format("wav")
-                .on("error", (err) => {
-                    console.error(`An error occurred during transcoding: ${err.message}`);
-                    reject(err);
-                })
-                .on("end", () => {
-                    console.log("Transcoding finished successfully.");
+            console.log(`Using ffmpeg binary at: ${ffmpegStatic}`);
+
+            const ffmpegProcess = spawn(ffmpegStatic, [
+                '-i', inputPath,
+                '-f', 'webm',
+                '-acodec', 'pcm_s16le',
+                '-ar', '16000',
+                '-ac', '1',
+                '-f', 'wav',
+                outputPath
+            ]);
+
+            ffmpegProcess.stdout.on('data', (data) => {
+                console.log(`ffmpeg stdout: ${data}`);
+            });
+
+            ffmpegProcess.stderr.on('data', (data) => {
+                console.error(`ffmpeg stderr: ${data}`);
+            });
+
+            ffmpegProcess.on('close', (code) => {
+                if (code === 0) {
+                    console.log('Transcoding finished successfully.');
                     resolve();
-                })
-                .save(outputPath);
+                } else {
+                    console.error(`ffmpeg process exited with code ${code}`);
+                    reject(new Error(`ffmpeg process exited with code ${code}`));
+                }
+            });
+
+             ffmpegProcess.on('error', (err) => {
+                console.error('Failed to start ffmpeg process:', err);
+                reject(err);
+            });
         });
     }
 
@@ -226,7 +243,6 @@ app.ws("/api/voice/stream", async (ws, req) => {
         message: 'Connected to speech-to-text service'
     }));
 });
-
 
 
 // --- END OF FIX ---
