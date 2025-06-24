@@ -13,7 +13,8 @@ import path from 'path';
 import os from 'os';
 import fs from "fs";
 import fetch from "node-fetch";
-import FormData from "form-data";
+// import FormData from "form-data";
+import { fetch, FormData } from "undici";
 
 // Load environment variables
 dotenv.config();
@@ -135,8 +136,8 @@ app.ws("/api/voice/stream", (ws, req) => {
   
   // Alternative approach using axios instead of fetch
   async function processAudioWithAxios(audioBuffer, retryCount = 0) {
-    const axios = require('axios');
-    const FormData = require('form-data');
+    // const axios = require('axios');
+    // const FormData = require('form-data');
     
     try {
       // Create form data
@@ -156,7 +157,8 @@ app.ws("/api/voice/stream", (ws, req) => {
             ...form.getHeaders(),
             'xi-api-key': process.env.ELEVENLABS_API_KEY,
           },
-          timeout: 30000,
+          bodyTimeout: 30000,
+          headersTimeout: 60_000
           maxContentLength: Infinity,
           maxBodyLength: Infinity,
         }
