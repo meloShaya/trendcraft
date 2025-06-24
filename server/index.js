@@ -116,15 +116,23 @@ app.ws("/api/voice/stream", (ws, req) => {
           });
           form.append("model_id", "scribe_v1");
           form.append("language_code", "en");
+
+        // compute length
+          const length = await new Promise((resolve, reject) => {
+            form.getLength((err, len) => err ? reject(err) : resolve(len));
+          });
         
           const res = await fetch(
             "https://api.elevenlabs.io/v1/speech-to-text/",
             {
               method: "POST",
               headers: {
-                "xi-api-key": process.env.ELEVENLABS_API_KEY
+                ...form.getHeaders(), 
+                "xi-api-key": process.env.ELEVENLABS_API_KEY,
+                "Content-Length": length, 
               },
-              body: form
+              body: form,
+              timeout: 120_000,
             }
           );
         
