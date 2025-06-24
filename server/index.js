@@ -66,6 +66,9 @@ app.ws("/api/voice/stream", (ws, req) => {
     stt: true  // <--- IMPORTANT!
   }
   });
+
+  //debug
+  console.log("ElevenLabsClient keys:", Object.keys(elevenlabs));
   
   // Buffer to collect audio chunks
   let audioChunks = [];
