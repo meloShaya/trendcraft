@@ -101,7 +101,7 @@ app.ws("/api/voice/stream", (ws, req) => {
       
       try {
         // Use ElevenLabs SDK to transcribe
-        const transcription = await elevenlabs.speechToText.convert({
+        const transcription = await elevenlabs.speechToText.create({
           audio: fs.createReadStream(tempFilePath),
           model_id: "scribe_v1",
           language_code: "en" // Adjust as needed
