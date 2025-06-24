@@ -108,7 +108,7 @@ app.ws("/api/voice/stream", (ws, req) => {
       // Write buffer to temporary file
       fs.writeFileSync(tempFilePath, combinedBuffer);
       
-      try 
+      try {
           const form = new FormData();
           form.append("file", fs.createReadStream(tempFilePath), {
             filename: "audio.webm",
@@ -147,7 +147,7 @@ app.ws("/api/voice/stream", (ws, req) => {
         }
         
       } finally {
-        // Clean up temporary file
+        // Clean up temporary fil
         try {
           fs.unlinkSync(tempFilePath);
         } catch (cleanupError) {
