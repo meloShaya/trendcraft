@@ -14,7 +14,7 @@ import os from 'os';
 import fs from "fs";
 import fetch from "node-fetch";
 // import FormData from "form-data";
-import { fetch, FormData } from "undici";
+import FormData from "undici";
 
 // Load environment variables
 dotenv.config();
