@@ -15,10 +15,16 @@ import fs from "fs";
 import { Buffer } from "buffer";
 import fetch from "node-fetch";
 import { FormData, Blob } from "formdata-node";
+import ffmpeg from "fluent-ffmpeg";
+import ffmpegStatic from "ffmpeg-static"; // <-- Import the ffmpeg-static path
 
+// Note: Ensure you have installed the correct packages for Node.js:
+// npm install elevenlabs fluent-ffmpeg ffmpeg-static formdata-node node-fetch
 
-import { FFmpeg } from '@ffmpeg/ffmpeg'; // <-- Corrected import
-import { fetchFile } from "@ffmpeg/util"; // <-- Utility to fetch core
+// Set the path for fluent-ffmpeg to find the executable.
+// This is the crucial step to prevent the 'ENOENT' error.
+ffmpeg.setFfmpegPath(ffmpegStatic);
+
 
 
 // Note: Ensure you have installed the necessary packages:
@@ -68,39 +74,9 @@ app.use(
 app.use(express.json());
 
 // websocket handler
-
-
 // --- WebSocket Endpoint ---
 app.ws("/api/voice/stream", async (ws, req) => {
     console.log("Client connected to server WebSocket");
-
-    // --- FFmpeg and ElevenLabs Client Initialization ---
-    // Initialize FFmpeg instance using the new class-based approach.
-    const ffmpeg = new FFmpeg();
-    ffmpeg.setLogging(true);
-    let isFFmpegLoaded = false;
-
-    // Asynchronously load the FFmpeg core.
-    const loadFFmpeg = async () => {
-        if (!isFFmpegLoaded) {
-            try {
-                // The new API requires loading the core explicitly.
-                // Using a CDN URL for the core is recommended for serverless environments.
-                const coreURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.js'
-                await ffmpeg.load({
-                    coreURL: await fetchFile(coreURL)
-                });
-                isFFmpegLoaded = true;
-                console.log("FFmpeg core loaded successfully.");
-            } catch (e) {
-                console.error("Error loading FFmpeg core:", e);
-                ws.send(JSON.stringify({ type: 'error', message: 'Failed to load audio processing engine.' }));
-            }
-        }
-    };
-    // Start loading immediately on connection.
-    loadFFmpeg();
-
 
     // Initialize ElevenLabs client
     const elevenlabs = new ElevenLabsClient({
@@ -115,45 +91,34 @@ app.ws("/api/voice/stream", async (ws, req) => {
     let chunkTimer = null;
 
     /**
-     * Transcodes a WEBM buffer to a WAV buffer using the WebAssembly FFmpeg.
-     * @param {Buffer} webmBuffer - The input buffer containing WEBM audio.
-     * @returns {Promise<Buffer>} A promise that resolves with the WAV audio buffer.
+     * Transcodes a local WEBM file to a local WAV file using ffmpeg.
+     * @param {string} inputPath - The path to the input .webm file.
+     * @param {string} outputPath - The path where the output .wav file will be saved.
+     * @returns {Promise<void>} A promise that resolves when transcoding is complete.
      */
-    async function transcodeToWav(webmBuffer) {
-        if (!isFFmpegLoaded) {
-            console.log("FFmpeg not loaded yet, waiting...");
-            await loadFFmpeg(); // Ensure it's loaded before proceeding
-            if (!isFFmpegLoaded) throw new Error("FFmpeg could not be loaded.");
-        }
-
-        const inputFileName = `input_${Date.now()}.webm`;
-        const outputFileName = `output_${Date.now()}.wav`;
-
-        console.log(`Starting transcoding: ${inputFileName} -> ${outputFileName}`);
-
-        // Write the input buffer to FFmpeg's virtual file system
-        await ffmpeg.writeFile(inputFileName, new Uint8Array(webmBuffer));
-
-        // Run the FFmpeg command to transcode the file
-        // -i: input file
-        // -acodec pcm_s16le: output codec (16-bit PCM, standard for WAV)
-        // -f wav: output format
-        await ffmpeg.exec(["-i", inputFileName, "-acodec", "pcm_s16le", "-f", "wav", outputFileName]);
-
-        // Read the resulting WAV file from the virtual file system
-        const outputData = await ffmpeg.readFile(outputFileName);
-
-        // Clean up the virtual files
-        await ffmpeg.deleteFile(inputFileName);
-        await ffmpeg.deleteFile(outputFileName);
-
-        console.log("Transcoding finished.");
-        return Buffer.from(outputData); // Convert Uint8Array to Node.js Buffer
+    function transcodeToWav(inputPath, outputPath) {
+        return new Promise((resolve, reject) => {
+            console.log(`Starting transcoding from ${inputPath} to ${outputPath}`);
+            ffmpeg(inputPath)
+                .inputFormat("webm")
+                .audioCodec("pcm_s16le") // Standard 16-bit PCM for WAV
+                .audioFrequency(16000)   // Set sample rate (optional, but good practice for STT)
+                .audioChannels(1)        // Set to mono (optional, but good practice for STT)
+                .format("wav")
+                .on("error", (err) => {
+                    console.error(`An error occurred during transcoding: ${err.message}`);
+                    reject(err);
+                })
+                .on("end", () => {
+                    console.log("Transcoding finished successfully.");
+                    resolve();
+                })
+                .save(outputPath);
+        });
     }
 
-
     /**
-     * Processes the accumulated audio chunks by transcoding and sending to ElevenLabs STT.
+     * Processes the accumulated audio chunks by saving, transcoding, and sending to ElevenLabs STT.
      */
     async function processAudioChunks() {
         if (audioChunks.length === 0 || isProcessing) return;
@@ -161,7 +126,6 @@ app.ws("/api/voice/stream", async (ws, req) => {
         isProcessing = true;
         console.log(`Processing ${audioChunks.length} audio chunks.`);
 
-        // Clear timer and reset chunk collection
         if (chunkTimer) {
             clearTimeout(chunkTimer);
             chunkTimer = null;
@@ -169,27 +133,35 @@ app.ws("/api/voice/stream", async (ws, req) => {
         const chunksToProcess = audioChunks;
         audioChunks = [];
 
+        const tempDir = os.tmpdir();
+        const inputWebmPath = path.join(tempDir, `audio_${Date.now()}.webm`);
+        const outputWavPath = path.join(tempDir, `audio_${Date.now()}.wav`);
+
         try {
             const combinedBuffer = Buffer.concat(chunksToProcess.map(chunk => Buffer.from(chunk)));
-            console.log(`Combined buffer size: ${combinedBuffer.length} bytes`);
+            console.log(`Combined buffer size: ${combinedBuffer.length} bytes. Writing to ${inputWebmPath}`);
 
-            // 1) Transcode WEBM to WAV using our new function
-            const wavBuffer = await transcodeToWav(combinedBuffer);
-            console.log(`Transcoded WAV buffer size: ${wavBuffer.length} bytes`);
+            // 1) Write the combined buffer to a temporary .webm file
+            fs.writeFileSync(inputWebmPath, combinedBuffer);
 
-            // 2) Prepare form data for ElevenLabs
+            // 2) Transcode the .webm file to a .wav file
+            await transcodeToWav(inputWebmPath, outputWavPath);
+
+            // 3) Read the transcoded .wav file into a buffer
+            const wavBuffer = fs.readFileSync(outputWavPath);
+            console.log(`Read transcoded WAV buffer: ${wavBuffer.length} bytes`);
+
+            // 4) Prepare form data for ElevenLabs
             const form = new FormData();
             form.append("file", new Blob([wavBuffer], { type: "audio/wav" }), "audio.wav");
-            form.append("model_id", "scribe_v1"); // Or your desired model
+            form.append("model_id", "scribe_v1");
             form.append("language_code", "en");
 
-            // 3) POST to ElevenLabs
+            // 5) POST to ElevenLabs
             const res = await fetch("https://api.elevenlabs.io/v1/speech-to-text", {
                 method: "POST",
                 headers: { "xi-api-key": process.env.ELEVENLABS_API_KEY },
                 body: form,
-                bodyTimeout: 120_000,
-                headersTimeout: 60_000,
             });
 
             if (!res.ok) {
@@ -198,48 +170,43 @@ app.ws("/api/voice/stream", async (ws, req) => {
 
             const transcription = await res.json();
 
-            // 4) Send transcription back to client
+            // 6) Send transcription back to client
             if (ws.readyState === ws.OPEN && transcription.text && transcription.text.trim()) {
                 ws.send(JSON.stringify({
                     type: 'transcription',
                     text: transcription.text.trim(),
                 }));
                 console.log('Transcription:', transcription.text.trim());
-            } else {
-                console.log("Received empty transcription.");
             }
 
         } catch (error) {
             console.error('Error processing audio:', error);
             if (ws.readyState === ws.OPEN) {
-                ws.send(JSON.stringify({
-                    type: 'error',
-                    message: 'Failed to process audio: ' + error.message
-                }));
+                ws.send(JSON.stringify({ type: 'error', message: 'Failed to process audio.' }));
             }
         } finally {
+            // 7) Clean up temporary files
+            if (fs.existsSync(inputWebmPath)) fs.unlinkSync(inputWebmPath);
+            if (fs.existsSync(outputWavPath)) fs.unlinkSync(outputWavPath);
+            console.log("Cleaned up temporary files.");
+
             isProcessing = false;
-            // If new chunks arrived during processing, queue up the next run
-            if(audioChunks.length > 0) {
+            if (audioChunks.length > 0) {
                 process.nextTick(processAudioChunks);
             }
         }
     }
 
     // --- WebSocket Event Handlers ---
-
     ws.onmessage = (msg) => {
         audioChunks.push(msg.data);
-
-        // Process immediately if threshold is met
-        if (audioChunks.length >= CHUNK_COUNT_THRESHOLD) {
-            if (chunkTimer) {
+        if (audioChunks.length >= CHUNK_COUNT_THRESHOLD && !isProcessing) {
+             if (chunkTimer) {
                 clearTimeout(chunkTimer);
                 chunkTimer = null;
             }
             processAudioChunks();
-        } else if (!chunkTimer) {
-            // Otherwise, set a timer to process after a delay
+        } else if (!chunkTimer && !isProcessing) {
             chunkTimer = setTimeout(processAudioChunks, MAX_WAIT_TIME);
         }
     };
@@ -247,7 +214,6 @@ app.ws("/api/voice/stream", async (ws, req) => {
     ws.onclose = () => {
         console.log("Client disconnected. Cleaning up.");
         if (chunkTimer) clearTimeout(chunkTimer);
-        // If there are leftover chunks, process them
         if (audioChunks.length > 0) processAudioChunks();
     };
 
@@ -260,6 +226,7 @@ app.ws("/api/voice/stream", async (ws, req) => {
         message: 'Connected to speech-to-text service'
     }));
 });
+
 
 
 // --- END OF FIX ---
