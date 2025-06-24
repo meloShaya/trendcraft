@@ -12,12 +12,7 @@ import { WebSocket as WsClient } from "ws";
 import path from 'path';
 import os from 'os';
 import fs from "fs";
-// import ffmpeg from "fluent-ffmpeg";
-// import ffmpegStatic from "ffmpeg-static";
-// import fetch from "node-fetch";
-// import FormData from "form-data";
-// import { fetch, FormData } from "undici";
-// import { Blob } from "buffer"; 
+
 
 import { createFFmpeg } from "@ffmpeg/ffmpeg"; // <-- Import the new library
 
