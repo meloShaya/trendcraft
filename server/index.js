@@ -87,9 +87,7 @@ app.ws("/api/voice/stream", (ws, req) => {
   async function processIndividualChunk(chunk, retryCount = 0) {
     try {
       console.log(`Processing individual chunk of size: ${chunk.length} bytes`);
-      
-      const FormData = require('form-data');
-      const form = new FormData();
+     
       
       // Send the individual chunk as-is (it should be a valid WebM segment)
       form.append('file', chunk, {
