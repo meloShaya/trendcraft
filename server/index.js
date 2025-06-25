@@ -72,17 +72,24 @@ app.ws("/api/voice/stream", (ws, req) => {
   let isProcessing = false;
   
   // Configuration
-  const CHUNK_COUNT_THRESHOLD = 15; // Increased for better audio quality
-  const MAX_WAIT_TIME = 2000; // Reduced wait time
-  const MIN_BUFFER_SIZE = 8192; // Larger minimum buffer
+  const CHUNK_COUNT_THRESHOLD = 15; // Process after collecting chunks
+  const MAX_WAIT_TIME = 2000; // Wait time before processing
+  const MIN_CHUNK_SIZE = 1500; // Minimum individual chunk size (reduced)
+  const MIN_COMBINED_SIZE = 8000; // Minimum combined buffer size
+  const SILENCE_THRESHOLD = 3000; // Time to wait for silence detection (3 seconds)
   const MAX_RETRIES = 3;
   let chunkTimer = null;
+  let silenceTimer = null;
   let chunkCount = 0;
+  let lastChunkTime = Date.now();
   
   // Solution 1: Send individual chunks instead of concatenating
   async function processIndividualChunk(chunk, retryCount = 0) {
     try {
       console.log(`Processing individual chunk of size: ${chunk.length} bytes`);
+      
+      const FormData = require('form-data');
+      const form = new FormData();
       
       // Send the individual chunk as-is (it should be a valid WebM segment)
       form.append('file', chunk, {
@@ -156,12 +163,12 @@ app.ws("/api/voice/stream", (ws, req) => {
     }
   }
   
-  // Solution 3: Process chunks as they arrive (streaming approach)
+  // Solution 3: Process chunks with better size handling and silence detection
   async function processStreamingChunks() {
     if (audioChunks.length === 0 || isProcessing) return;
     
     isProcessing = true;
-    console.log(`Processing ${audioChunks.length} chunks individually`);
+    console.log(`Processing ${audioChunks.length} chunks with smart grouping`);
     
     const transcriptions = [];
     const chunksToProcess = [...audioChunks]; // Copy array
@@ -169,14 +176,37 @@ app.ws("/api/voice/stream", (ws, req) => {
     chunkCount = 0;
     
     try {
-      // Process each chunk that's large enough
-      for (let i = 0; i < chunksToProcess.length; i++) {
-        const chunk = chunksToProcess[i];
+      // Group small chunks together to meet minimum size requirements
+      const groupedChunks = [];
+      let currentGroup = [];
+      let currentGroupSize = 0;
+      
+      for (const chunk of chunksToProcess) {
+        currentGroup.push(chunk);
+        currentGroupSize += chunk.length;
         
-        if (chunk.length < MIN_BUFFER_SIZE) {
-          console.log(`Skipping small chunk ${i + 1}: ${chunk.length} bytes`);
-          continue;
+        // If group is large enough, or we have enough chunks, process it
+        if (currentGroupSize >= MIN_COMBINED_SIZE || currentGroup.length >= 5) {
+          if (currentGroupSize >= MIN_CHUNK_SIZE) {
+            groupedChunks.push(Buffer.concat(currentGroup));
+          }
+          currentGroup = [];
+          currentGroupSize = 0;
         }
+      }
+      
+      // Don't forget the last group
+      if (currentGroup.length > 0 && currentGroupSize >= MIN_CHUNK_SIZE) {
+        groupedChunks.push(Buffer.concat(currentGroup));
+      }
+      
+      console.log(`Created ${groupedChunks.length} grouped chunks for processing`);
+      
+      // Process each grouped chunk
+      for (let i = 0; i < groupedChunks.length; i++) {
+        const chunk = groupedChunks[i];
+        
+        console.log(`Processing grouped chunk ${i + 1}: ${chunk.length} bytes`);
         
         try {
           const result = await processIndividualChunk(chunk);
@@ -190,8 +220,8 @@ app.ws("/api/voice/stream", (ws, req) => {
         }
         
         // Small delay between requests to avoid rate limiting
-        if (i < chunksToProcess.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 100));
+        if (i < groupedChunks.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 200));
         }
       }
       
@@ -203,10 +233,25 @@ app.ws("/api/voice/stream", (ws, req) => {
           text: combinedText,
           language: 'en',
           confidence: 0.8,
-          chunks_processed: transcriptions.length
+          chunks_processed: transcriptions.length,
+          is_final: true // Indicate this is a complete transcription
         }));
         
         console.log('Combined transcription:', combinedText);
+      } else {
+        console.log('No valid transcriptions generated');
+        // Send empty result to indicate processing completed but no speech detected
+        if (ws.readyState === ws.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'transcription',
+            text: '',
+            language: 'en',
+            confidence: 0,
+            chunks_processed: 0,
+            is_final: true,
+            message: 'No speech detected in audio'
+          }));
+        }
       }
       
     } catch (error) {
@@ -270,27 +315,53 @@ app.ws("/api/voice/stream", (ws, req) => {
         return;
       }
       
+      // Update last chunk time for silence detection
+      lastChunkTime = Date.now();
+      
       // Store chunk
       audioChunks.push(msg.data);
       chunkCount++;
       
       console.log(`Received chunk ${chunkCount}, size: ${msg.data.length} bytes`);
       
-      // Process when we have enough chunks OR individual chunk is large enough
-      if (chunkCount >= CHUNK_COUNT_THRESHOLD || msg.data.length >= MIN_BUFFER_SIZE * 2) {
+      // Clear any existing silence timer since we got new audio
+      if (silenceTimer) {
+        clearTimeout(silenceTimer);
+        silenceTimer = null;
+      }
+      
+      // Process immediately if we have enough chunks
+      if (chunkCount >= CHUNK_COUNT_THRESHOLD) {
         if (chunkTimer) {
           clearTimeout(chunkTimer);
           chunkTimer = null;
         }
+        console.log('Processing due to chunk count threshold');
         processAudioChunks();
       } else {
-        // Set timer for smaller chunks
+        // Set timer for processing chunks after max wait time
         if (!chunkTimer) {
           chunkTimer = setTimeout(() => {
             chunkTimer = null;
+            console.log('Processing due to time threshold');
             processAudioChunks();
           }, MAX_WAIT_TIME);
         }
+        
+        // Set silence detection timer
+        silenceTimer = setTimeout(() => {
+          silenceTimer = null;
+          const timeSinceLastChunk = Date.now() - lastChunkTime;
+          
+          if (timeSinceLastChunk >= SILENCE_THRESHOLD && audioChunks.length > 0) {
+            console.log('Processing due to silence detection');
+            if (chunkTimer) {
+              clearTimeout(chunkTimer);
+              chunkTimer = null;
+            }
+            processAudioChunks();
+          }
+        }, SILENCE_THRESHOLD);
       }
       
     } catch (error) {
@@ -308,11 +379,18 @@ app.ws("/api/voice/stream", (ws, req) => {
   ws.onclose = () => {
     console.log("Client disconnected from server WebSocket");
     
+    // Clear all timers
     if (chunkTimer) {
       clearTimeout(chunkTimer);
       chunkTimer = null;
     }
     
+    if (silenceTimer) {
+      clearTimeout(silenceTimer);
+      silenceTimer = null;
+    }
+    
+    // Process any remaining chunks before disconnect
     if (audioChunks.length > 0 && !isProcessing) {
       console.log('Processing remaining chunks before disconnect');
       processAudioChunks();
@@ -322,9 +400,16 @@ app.ws("/api/voice/stream", (ws, req) => {
   // Handle WebSocket errors
   ws.onerror = (error) => {
     console.error('WebSocket error:', error);
+    
+    // Clear all timers
     if (chunkTimer) {
       clearTimeout(chunkTimer);
       chunkTimer = null;
+    }
+    
+    if (silenceTimer) {
+      clearTimeout(silenceTimer);
+      silenceTimer = null;
     }
   };
   
@@ -336,7 +421,6 @@ app.ws("/api/voice/stream", (ws, req) => {
     }));
   }
 });
-
 // --- END OF FIX ---
 
 // Root route for backend
