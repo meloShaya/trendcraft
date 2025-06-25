@@ -139,9 +139,7 @@ app.ws("/api/voice/stream", (ws, req) => {
   
   // Alternative approach using axios instead of fetch
   async function processAudioWithAxios(audioBuffer, retryCount = 0) {
-    const axios = require('axios');
-    const FormData = require('form-data');
-    
+       
     try {
       // Create form data
       const form = new FormData();
