@@ -338,16 +338,33 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ onContentGenerated }) => {
                     console.log('Received WebSocket message:', event.data);
                     const data = JSON.parse(event.data);
                     
-                    if (data.transcript) {
-                        finalTranscriptRef.current += data.transcript;
-                        setProcessingStatus(`Processing: "${data.transcript}"`);
-                        console.log('Transcript received:', data.transcript);
-                    }
-                    
-                    if (data.is_final) {
-                        console.log('Final transcript:', finalTranscriptRef.current);
-                        setProcessingStatus('Finalizing...');
-                        stopListening();
+                    if (data.type === 'transcription') {
+                        if (data.text && data.text.trim()) {
+                            // Handle partial transcription
+                            if (!data.is_final) {
+                                setProcessingStatus(`Processing: "${data.text}"`);
+                                console.log('Partial transcription:', data.text);
+                            } else {
+                                // Handle final transcription
+                                finalTranscriptRef.current = data.text.trim();
+                                setProcessingStatus('Finalizing...');
+                                console.log('Final transcription:', finalTranscriptRef.current);
+                                
+                                // Stop listening and process the final result
+                                stopListening();
+                            }
+                        } else if (data.is_final) {
+                            // Empty final result - no speech detected
+                            console.log('No speech detected in final result');
+                            setProcessingStatus('No speech detected');
+                            stopListening();
+                        }
+                    } else if (data.type === 'connected') {
+                        console.log('Connected to voice service:', data.message);
+                    } else if (data.type === 'error') {
+                        console.error('Voice service error:', data.message);
+                        addMessage('error', data.message);
+                        setConnectionStatus('error');
                     }
                 } catch (error) {
                     console.error('Error parsing WebSocket message:', error);

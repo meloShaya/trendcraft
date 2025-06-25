@@ -18,7 +18,6 @@ import FormData from 'form-data';
 
 
 
-
 // Load environment variable
 dotenv.config();
 
@@ -87,7 +86,9 @@ app.ws("/api/voice/stream", (ws, req) => {
   async function processIndividualChunk(chunk, retryCount = 0) {
     try {
       console.log(`Processing individual chunk of size: ${chunk.length} bytes`);
-     
+      
+      // Create a new FormData instance for each chunk
+      const form = new FormData();
       
       // Send the individual chunk as-is (it should be a valid WebM segment)
       form.append('file', chunk, {
@@ -282,7 +283,7 @@ app.ws("/api/voice/stream", (ws, req) => {
         segmentEnd = Math.min(segmentEnd, buffer.length);
         
         const segment = buffer.slice(currentPos, segmentEnd);
-        if (segment.length > MIN_BUFFER_SIZE) {
+        if (segment.length > MIN_CHUNK_SIZE) {
           segments.push(segment);
         }
         
