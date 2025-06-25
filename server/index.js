@@ -15,17 +15,8 @@ import fs from "fs";
 import { Buffer } from "buffer";
 import fetch from "node-fetch";
 import { FormData, Blob } from "formdata-node";
-import ffmpeg from "fluent-ffmpeg";
-
-import { spawn } from "child_process"; // <-- Import spawn directly
-import ffmpegStatic from "ffmpeg-static"; // <-- We still need the path
-
-// Note: Ensure you have installed the correct packages for Node.js:
-// npm install elevenlabs ffmpeg-static formdata-node node-fetch
 
 
-// Note: Ensure you have installed the necessary packages:
-// npm install elevenlabs @ffmpeg/ffmpeg @ffmpeg/util formdata-node node-fetch
 
 // Load environment variable
 dotenv.config();
@@ -72,176 +63,318 @@ app.use(express.json());
 
 
 // --- WebSocket Endpoint ---
-app.ws("/api/voice/stream", async (ws, req) => {
-    console.log("Client connected to server WebSocket");
-
-    // Initialize ElevenLabs client
-    const elevenlabs = new ElevenLabsClient({
-        apiKey: process.env.ELEVENLABS_API_KEY,
-    });
-
-    // --- State Management ---
-    let audioChunks = [];
-    let isProcessing = false;
-    const CHUNK_COUNT_THRESHOLD = 10; // Process every N chunks
-    const MAX_WAIT_TIME = 3000;       // Or process every 3 seconds
-    let chunkTimer = null;
-
-    /**
-     * Transcodes a local WEBM file to a local WAV file using a direct ffmpeg spawn.
-     * This is more robust in environments where fluent-ffmpeg has issues.
-     * @param {string} inputPath - The path to the input .webm file.
-     * @param {string} outputPath - The path where the output .wav file will be saved.
-     * @returns {Promise<void>} A promise that resolves when transcoding is complete.
-     */
-    function transcodeToWav(inputPath, outputPath) {
-        return new Promise((resolve, reject) => {
-            console.log(`Starting transcoding from ${inputPath} to ${outputPath}`);
-            console.log(`Using ffmpeg binary at: ${ffmpegStatic}`);
-
-            const ffmpegProcess = spawn(ffmpegStatic, [
-                '-i', inputPath,
-                '-f', 'webm',
-                '-acodec', 'pcm_s16le',
-                '-ar', '16000',
-                '-ac', '1',
-                '-f', 'wav',
-                outputPath
-            ]);
-
-            ffmpegProcess.stdout.on('data', (data) => {
-                console.log(`ffmpeg stdout: ${data}`);
-            });
-
-            ffmpegProcess.stderr.on('data', (data) => {
-                console.error(`ffmpeg stderr: ${data}`);
-            });
-
-            ffmpegProcess.on('close', (code) => {
-                if (code === 0) {
-                    console.log('Transcoding finished successfully.');
-                    resolve();
-                } else {
-                    console.error(`ffmpeg process exited with code ${code}`);
-                    reject(new Error(`ffmpeg process exited with code ${code}`));
-                }
-            });
-
-             ffmpegProcess.on('error', (err) => {
-                console.error('Failed to start ffmpeg process:', err);
-                reject(err);
-            });
-        });
-    }
-
-    /**
-     * Processes the accumulated audio chunks by saving, transcoding, and sending to ElevenLabs STT.
-     */
-    async function processAudioChunks() {
-        if (audioChunks.length === 0 || isProcessing) return;
-
-        isProcessing = true;
-        console.log(`Processing ${audioChunks.length} audio chunks.`);
-
-        if (chunkTimer) {
-            clearTimeout(chunkTimer);
-            chunkTimer = null;
+app.ws("/api/voice/stream", (ws, req) => {
+  console.log("Client connected to server WebSocket");
+  
+  // Buffer to collect audio chunks
+  let audioChunks = [];
+  let isProcessing = false;
+  
+  // Configuration
+  const CHUNK_COUNT_THRESHOLD = 10;
+  const MAX_WAIT_TIME = 3000;
+  const MIN_BUFFER_SIZE = 1024;
+  const MAX_RETRIES = 3;
+  let chunkTimer = null;
+  let chunkCount = 0;
+  
+  // Function to create multipart form data manually
+  function createMultipartFormData(audioBuffer, boundary) {
+    const CRLF = '\r\n';
+    const delimiter = `--${boundary}`;
+    const closeDelimiter = `--${boundary}--`;
+    
+    let body = Buffer.alloc(0);
+    
+    // Add file field
+    const fileHeader = [
+      delimiter,
+      'Content-Disposition: form-data; name="file"; filename="audio.webm"',
+      'Content-Type: audio/webm',
+      '',
+      ''
+    ].join(CRLF);
+    
+    body = Buffer.concat([
+      body,
+      Buffer.from(fileHeader, 'utf8'),
+      audioBuffer,
+      Buffer.from(CRLF, 'utf8')
+    ]);
+    
+    // Add model_id field
+    const modelHeader = [
+      delimiter,
+      'Content-Disposition: form-data; name="model_id"',
+      '',
+      'scribe_v1'
+    ].join(CRLF);
+    
+    body = Buffer.concat([
+      body,
+      Buffer.from(modelHeader + CRLF, 'utf8')
+    ]);
+    
+    // Add language_code field
+    const langHeader = [
+      delimiter,
+      'Content-Disposition: form-data; name="language_code"',
+      '',
+      'en'
+    ].join(CRLF);
+    
+    body = Buffer.concat([
+      body,
+      Buffer.from(langHeader + CRLF, 'utf8')
+    ]);
+    
+    // Close multipart
+    body = Buffer.concat([
+      body,
+      Buffer.from(closeDelimiter + CRLF, 'utf8')
+    ]);
+    
+    return body;
+  }
+  
+  // Alternative approach using axios instead of fetch
+  async function processAudioWithAxios(audioBuffer, retryCount = 0) {
+    const axios = require('axios');
+    const FormData = require('form-data');
+    
+    try {
+      // Create form data
+      const form = new FormData();
+      form.append('file', audioBuffer, {
+        filename: 'audio.webm',
+        contentType: 'audio/webm'
+      });
+      form.append('model_id', 'scribe_v1');
+      form.append('language_code', 'en');
+      
+      const response = await axios.post(
+        'https://api.elevenlabs.io/v1/speech-to-text/',
+        form,
+        {
+          headers: {
+            ...form.getHeaders(),
+            'xi-api-key': process.env.ELEVENLABS_API_KEY,
+          },
+          timeout: 30000,
+          maxContentLength: Infinity,
+          maxBodyLength: Infinity,
         }
-        const chunksToProcess = audioChunks;
-        audioChunks = [];
-
-        const tempDir = os.tmpdir();
-        const inputWebmPath = path.join(tempDir, `audio_${Date.now()}.webm`);
-        const outputWavPath = path.join(tempDir, `audio_${Date.now()}.wav`);
-
+      );
+      
+      return response.data;
+      
+    } catch (error) {
+      if (retryCount < MAX_RETRIES && (
+        error.code === 'ECONNRESET' || 
+        error.code === 'ENOTFOUND' || 
+        error.code === 'ETIMEDOUT' ||
+        error.code === 'ECONNABORTED'
+      )) {
+        console.log(`Axios retry ${retryCount + 1} in ${(retryCount + 1) * 1000}ms...`);
+        await new Promise(resolve => setTimeout(resolve, (retryCount + 1) * 1000));
+        return processAudioWithAxios(audioBuffer, retryCount + 1);
+      }
+      throw error;
+    }
+  }
+  
+  // Main processing function with multiple approaches
+  async function processAudioChunks(retryCount = 0) {
+    if (audioChunks.length === 0 || isProcessing) return;
+    
+    isProcessing = true;
+    console.log(`Processing ${audioChunks.length} audio chunks (attempt ${retryCount + 1})`);
+    
+    try {
+      // Combine all audio chunks into a single buffer
+      const combinedBuffer = Buffer.concat(audioChunks.map(chunk => Buffer.from(chunk)));
+      
+      console.log(`Combined buffer size: ${combinedBuffer.length} bytes`);
+      
+      // Check if buffer is large enough to process
+      if (combinedBuffer.length < MIN_BUFFER_SIZE) {
+        console.log(`Buffer too small (${combinedBuffer.length} bytes), skipping processing`);
+        isProcessing = false;
+        return;
+      }
+      
+      // Clear chunks for next batch
+      audioChunks = [];
+      chunkCount = 0;
+      
+      let transcription;
+      
+      // Try axios approach first (often more reliable)
+      try {
+        console.log('Attempting transcription with axios...');
+        transcription = await processAudioWithAxios(combinedBuffer);
+      } catch (axiosError) {
+        console.log('Axios failed, trying manual fetch approach...', axiosError.message);
+        
+        // Fallback to manual multipart approach
+        const boundary = `----formdata-node-${Math.random().toString(36)}`;
+        const body = createMultipartFormData(combinedBuffer, boundary);
+        
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000);
+        
         try {
-            const combinedBuffer = Buffer.concat(chunksToProcess.map(chunk => Buffer.from(chunk)));
-            console.log(`Combined buffer size: ${combinedBuffer.length} bytes. Writing to ${inputWebmPath}`);
-
-            // 1) Write the combined buffer to a temporary .webm file
-            fs.writeFileSync(inputWebmPath, combinedBuffer);
-
-            // 2) Transcode the .webm file to a .wav file
-            await transcodeToWav(inputWebmPath, outputWavPath);
-
-            // 3) Read the transcoded .wav file into a buffer
-            const wavBuffer = fs.readFileSync(outputWavPath);
-            console.log(`Read transcoded WAV buffer: ${wavBuffer.length} bytes`);
-
-            // 4) Prepare form data for ElevenLabs
-            const form = new FormData();
-            form.append("file", new Blob([wavBuffer], { type: "audio/wav" }), "audio.wav");
-            form.append("model_id", "scribe_v1");
-            form.append("language_code", "en");
-
-            // 5) POST to ElevenLabs
-            const res = await fetch("https://api.elevenlabs.io/v1/speech-to-text", {
-                method: "POST",
-                headers: { "xi-api-key": process.env.ELEVENLABS_API_KEY },
-                body: form,
-            });
-
-            if (!res.ok) {
-                throw new Error(`STT API error: ${res.status} – ${await res.text()}`);
-            }
-
-            const transcription = await res.json();
-
-            // 6) Send transcription back to client
-            if (ws.readyState === ws.OPEN && transcription.text && transcription.text.trim()) {
-                ws.send(JSON.stringify({
-                    type: 'transcription',
-                    text: transcription.text.trim(),
-                }));
-                console.log('Transcription:', transcription.text.trim());
-            }
-
-        } catch (error) {
-            console.error('Error processing audio:', error);
-            if (ws.readyState === ws.OPEN) {
-                ws.send(JSON.stringify({ type: 'error', message: 'Failed to process audio.' }));
-            }
-        } finally {
-            // 7) Clean up temporary files
-            if (fs.existsSync(inputWebmPath)) fs.unlinkSync(inputWebmPath);
-            if (fs.existsSync(outputWavPath)) fs.unlinkSync(outputWavPath);
-            console.log("Cleaned up temporary files.");
-
-            isProcessing = false;
-            if (audioChunks.length > 0) {
-                process.nextTick(processAudioChunks);
-            }
+          const response = await fetch('https://api.elevenlabs.io/v1/speech-to-text/', {
+            method: 'POST',
+            headers: {
+              'Content-Type': `multipart/form-data; boundary=${boundary}`,
+              'xi-api-key': process.env.ELEVENLABS_API_KEY,
+              'Content-Length': body.length.toString(),
+              'Connection': 'keep-alive',
+              'User-Agent': 'Node.js/STT-Client'
+            },
+            body: body,
+            signal: controller.signal
+          });
+          
+          clearTimeout(timeoutId);
+          
+          if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`STT API error: ${response.status} ${response.statusText} - ${errorText}`);
+          }
+          
+          transcription = await response.json();
+        } catch (fetchError) {
+          clearTimeout(timeoutId);
+          throw fetchError;
         }
+      }
+      
+      // Send transcription back to client
+      if (ws.readyState === ws.OPEN && transcription && transcription.text) {
+        ws.send(JSON.stringify({
+          type: 'transcription',
+          text: transcription.text.trim(),
+          language: transcription.detected_language || 'en',
+          confidence: transcription.confidence || 0
+        }));
+        
+        console.log('Transcription successful:', transcription.text.trim());
+      } else if (transcription) {
+        console.log('Empty transcription received');
+      }
+      
+    } catch (error) {
+      console.error(`Error processing audio (attempt ${retryCount + 1}):`, error.message);
+      
+      // Retry logic for network errors
+      if (retryCount < MAX_RETRIES && (
+        error.code === 'ECONNRESET' || 
+        error.code === 'ENOTFOUND' || 
+        error.code === 'ETIMEDOUT' ||
+        error.code === 'ECONNABORTED' ||
+        error.name === 'AbortError' ||
+        error.message.includes('socket hang up')
+      )) {
+        const delay = Math.min(1000 * Math.pow(2, retryCount), 8000); // Exponential backoff, max 8s
+        console.log(`Retrying in ${delay}ms...`);
+        setTimeout(() => {
+          processAudioChunks(retryCount + 1);
+        }, delay);
+        return;
+      }
+      
+      // Send error to client if all retries failed
+      if (ws.readyState === ws.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'error',
+          message: `Failed to process audio after ${retryCount + 1} attempts: ${error.message}`
+        }));
+      }
+    } finally {
+      isProcessing = false;
     }
-
-    // --- WebSocket Event Handlers ---
-    ws.onmessage = (msg) => {
-        audioChunks.push(msg.data);
-        if (audioChunks.length >= CHUNK_COUNT_THRESHOLD && !isProcessing) {
-             if (chunkTimer) {
-                clearTimeout(chunkTimer);
-                chunkTimer = null;
-            }
-            processAudioChunks();
-        } else if (!chunkTimer && !isProcessing) {
-            chunkTimer = setTimeout(processAudioChunks, MAX_WAIT_TIME);
+  }
+  
+  // Handle incoming audio data from client
+  ws.onmessage = (msg) => {
+    try {
+      // Validate message data
+      if (!msg.data || msg.data.length === 0) {
+        console.warn('Received empty audio chunk, skipping');
+        return;
+      }
+      
+      // Add audio chunk to collection
+      audioChunks.push(msg.data);
+      chunkCount++;
+      
+      console.log(`Received chunk ${chunkCount}, size: ${msg.data.length} bytes`);
+      
+      // Process if we have enough chunks
+      if (chunkCount >= CHUNK_COUNT_THRESHOLD) {
+        if (chunkTimer) {
+          clearTimeout(chunkTimer);
+          chunkTimer = null;
         }
-    };
-
-    ws.onclose = () => {
-        console.log("Client disconnected. Cleaning up.");
-        if (chunkTimer) clearTimeout(chunkTimer);
-        if (audioChunks.length > 0) processAudioChunks();
-    };
-
-    ws.onerror = (error) => {
-        console.error('WebSocket error:', error);
-    };
-
+        processAudioChunks();
+      } else {
+        // Set timer to process chunks after max wait time
+        if (!chunkTimer) {
+          chunkTimer = setTimeout(() => {
+            chunkTimer = null;
+            processAudioChunks();
+          }, MAX_WAIT_TIME);
+        }
+      }
+      
+    } catch (error) {
+      console.error('Error handling audio message:', error);
+      if (ws.readyState === ws.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'error',
+          message: 'Error processing audio chunk: ' + error.message
+        }));
+      }
+    }
+  };
+  
+  // Handle client disconnect
+  ws.onclose = () => {
+    console.log("Client disconnected from server WebSocket");
+    
+    // Clear any pending timer
+    if (chunkTimer) {
+      clearTimeout(chunkTimer);
+      chunkTimer = null;
+    }
+    
+    // Process any remaining audio chunks if we're not already processing
+    if (audioChunks.length > 0 && !isProcessing) {
+      console.log('Processing remaining audio chunks before disconnect');
+      processAudioChunks();
+    }
+  };
+  
+  // Handle WebSocket errors
+  ws.onerror = (error) => {
+    console.error('WebSocket error:', error);
+    
+    // Clear any pending timer
+    if (chunkTimer) {
+      clearTimeout(chunkTimer);
+      chunkTimer = null;
+    }
+  };
+  
+  // Send initial connection confirmation
+  if (ws.readyState === ws.OPEN) {
     ws.send(JSON.stringify({
-        type: 'connected',
-        message: 'Connected to speech-to-text service'
+      type: 'connected',
+      message: 'Connected to ElevenLabs speech-to-text service'
     }));
+  }
 });
 
 
