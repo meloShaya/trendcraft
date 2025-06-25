@@ -14,7 +14,8 @@ import os from 'os';
 import fs from "fs";
 import { Buffer } from "buffer";
 import fetch from "node-fetch";
-import { FormData, Blob } from "formdata-node";
+import FormData from 'form-data';
+import fetch from 'node-fetch';
 
 
 
