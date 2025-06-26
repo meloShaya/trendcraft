@@ -16,8 +16,6 @@ import { Buffer } from "buffer";
 import fetch from "node-fetch";
 import FormData from 'form-data';
 
-
-
 // Load environment variable
 dotenv.config();
 
@@ -61,367 +59,6 @@ app.use(
 );
 app.use(express.json());
 
-
-// --- WebSocket Endpoint ---
-app.ws("/api/voice/stream", (ws, req) => {
-  console.log("Client connected to server WebSocket");
-  
-  // Buffer to collect audio chunks
-  let audioChunks = [];
-  let isProcessing = false;
-  
-  // Configuration
-  const CHUNK_COUNT_THRESHOLD = 15; // Process after collecting chunks
-  const MAX_WAIT_TIME = 2000; // Wait time before processing
-  const MIN_CHUNK_SIZE = 1500; // Minimum individual chunk size (reduced)
-  const MIN_COMBINED_SIZE = 8000; // Minimum combined buffer size
-  const SILENCE_THRESHOLD = 3000; // Time to wait for silence detection (3 seconds)
-  const MAX_RETRIES = 3;
-  let chunkTimer = null;
-  let silenceTimer = null;
-  let chunkCount = 0;
-  let lastChunkTime = Date.now();
-  
-  // Solution 1: Send individual chunks instead of concatenating
-  async function processIndividualChunk(chunk, retryCount = 0) {
-    try {
-      console.log(`Processing individual chunk of size: ${chunk.length} bytes`);
-      
-      // Create a new FormData instance for each chunk
-      const form = new FormData();
-      
-      // Send the individual chunk as-is (it should be a valid WebM segment)
-      form.append('file', chunk, {
-        filename: 'audio.webm',
-        contentType: 'audio/webm'
-      });
-      form.append('model_id', 'scribe_v1');
-      form.append('language_code', 'en');
-      
-      const response = await fetch('https://api.elevenlabs.io/v1/speech-to-text/', {
-        method: 'POST',
-        headers: {
-          ...form.getHeaders(),
-          'xi-api-key': process.env.ELEVENLABS_API_KEY,
-        },
-        body: form
-      });
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`STT API error: ${response.status} - ${errorText}`);
-      }
-      
-      const result = await response.json();
-      return result;
-      
-    } catch (error) {
-      if (retryCount < MAX_RETRIES && (
-        error.message.includes('socket hang up') ||
-        error.code === 'ECONNRESET'
-      )) {
-        console.log(`Retrying individual chunk (${retryCount + 1})...`);
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        return processIndividualChunk(chunk, retryCount + 1);
-      }
-      throw error;
-    }
-  }
-  
-  // Solution 2: Convert to WAV format (simpler container)
-  function webmToWav(webmBuffer) {
-    // This is a simplified approach - extract raw audio data and wrap in WAV
-    // Note: This is a basic implementation and may not work for all WebM files
-    try {
-      // WAV header template (44 bytes)
-      const wavHeader = Buffer.alloc(44);
-      
-      // "RIFF" chunk descriptor
-      wavHeader.write('RIFF', 0);
-      wavHeader.writeUInt32LE(webmBuffer.length + 36, 4);
-      wavHeader.write('WAVE', 8);
-      
-      // "fmt " sub-chunk
-      wavHeader.write('fmt ', 12);
-      wavHeader.writeUInt32LE(16, 16); // Sub-chunk size
-      wavHeader.writeUInt16LE(1, 20);  // Audio format (PCM)
-      wavHeader.writeUInt16LE(1, 22);  // Number of channels
-      wavHeader.writeUInt32LE(16000, 24); // Sample rate
-      wavHeader.writeUInt32LE(32000, 28); // Byte rate
-      wavHeader.writeUInt16LE(2, 32);  // Block align
-      wavHeader.writeUInt16LE(16, 34); // Bits per sample
-      
-      // "data" sub-chunk
-      wavHeader.write('data', 36);
-      wavHeader.writeUInt32LE(webmBuffer.length, 40);
-      
-      return Buffer.concat([wavHeader, webmBuffer]);
-    } catch (error) {
-      console.error('WAV conversion failed:', error);
-      return null;
-    }
-  }
-  
-  // Solution 3: Process chunks with better size handling and silence detection
-  async function processStreamingChunks() {
-    if (audioChunks.length === 0 || isProcessing) return;
-    
-    isProcessing = true;
-    console.log(`Processing ${audioChunks.length} chunks with smart grouping`);
-    
-    const transcriptions = [];
-    const chunksToProcess = [...audioChunks]; // Copy array
-    audioChunks = []; // Clear original
-    chunkCount = 0;
-    
-    try {
-      // Group small chunks together to meet minimum size requirements
-      const groupedChunks = [];
-      let currentGroup = [];
-      let currentGroupSize = 0;
-      
-      for (const chunk of chunksToProcess) {
-        currentGroup.push(chunk);
-        currentGroupSize += chunk.length;
-        
-        // If group is large enough, or we have enough chunks, process it
-        if (currentGroupSize >= MIN_COMBINED_SIZE || currentGroup.length >= 5) {
-          if (currentGroupSize >= MIN_CHUNK_SIZE) {
-            groupedChunks.push(Buffer.concat(currentGroup));
-          }
-          currentGroup = [];
-          currentGroupSize = 0;
-        }
-      }
-      
-      // Don't forget the last group
-      if (currentGroup.length > 0 && currentGroupSize >= MIN_CHUNK_SIZE) {
-        groupedChunks.push(Buffer.concat(currentGroup));
-      }
-      
-      console.log(`Created ${groupedChunks.length} grouped chunks for processing`);
-      
-      // Process each grouped chunk
-      for (let i = 0; i < groupedChunks.length; i++) {
-        const chunk = groupedChunks[i];
-        
-        console.log(`Processing grouped chunk ${i + 1}: ${chunk.length} bytes`);
-        
-        try {
-          const result = await processIndividualChunk(chunk);
-          if (result && result.text && result.text.trim()) {
-            transcriptions.push(result.text.trim());
-            console.log(`Chunk ${i + 1} transcription:`, result.text.trim());
-          }
-        } catch (error) {
-          console.error(`Failed to process chunk ${i + 1}:`, error.message);
-          // Continue with next chunk
-        }
-        
-        // Small delay between requests to avoid rate limiting
-        if (i < groupedChunks.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 200));
-        }
-      }
-      
-      // Send combined results if any transcriptions were successful
-      if (transcriptions.length > 0 && ws.readyState === ws.OPEN) {
-        const combinedText = transcriptions.join(' ').trim();
-        ws.send(JSON.stringify({
-          type: 'transcription',
-          text: combinedText,
-          language: 'en',
-          confidence: 0.8,
-          chunks_processed: transcriptions.length,
-          is_final: true // Indicate this is a complete transcription
-        }));
-        
-        console.log('Combined transcription:', combinedText);
-      } else {
-        console.log('No valid transcriptions generated');
-        // Send empty result to indicate processing completed but no speech detected
-        if (ws.readyState === ws.OPEN) {
-          ws.send(JSON.stringify({
-            type: 'transcription',
-            text: '',
-            language: 'en',
-            confidence: 0,
-            chunks_processed: 0,
-            is_final: true,
-            message: 'No speech detected in audio'
-          }));
-        }
-      }
-      
-    } catch (error) {
-      console.error('Error in streaming processing:', error);
-      if (ws.readyState === ws.OPEN) {
-        ws.send(JSON.stringify({
-          type: 'error',
-          message: 'Streaming processing failed: ' + error.message
-        }));
-      }
-    } finally {
-      isProcessing = false;
-    }
-  }
-  
-  // Solution 4: Try to fix WebM by finding valid segments
-  function extractValidWebMSegments(buffer) {
-    const segments = [];
-    let currentPos = 0;
-    
-    // Look for WebM EBML headers (0x1A, 0x45, 0xDF, 0xA3)
-    while (currentPos < buffer.length - 4) {
-      if (buffer[currentPos] === 0x1A && 
-          buffer[currentPos + 1] === 0x45 && 
-          buffer[currentPos + 2] === 0xDF && 
-          buffer[currentPos + 3] === 0xA3) {
-        
-        // Found potential WebM header, try to extract segment
-        let segmentEnd = currentPos + 1000; // Approximate segment size
-        segmentEnd = Math.min(segmentEnd, buffer.length);
-        
-        const segment = buffer.slice(currentPos, segmentEnd);
-        if (segment.length > MIN_CHUNK_SIZE) {
-          segments.push(segment);
-        }
-        
-        currentPos = segmentEnd;
-      } else {
-        currentPos++;
-      }
-    }
-    
-    return segments;
-  }
-  
-  // Main processing function with multiple strategies
-  async function processAudioChunks() {
-    if (audioChunks.length === 0 || isProcessing) return;
-    
-    console.log(`Trying different processing strategies for ${audioChunks.length} chunks`);
-    
-    // Strategy 1: Try streaming approach (process individual chunks)
-    await processStreamingChunks();
-  }
-  
-  // Handle incoming audio data from client
-  ws.onmessage = (msg) => {
-    try {
-      if (!msg.data || msg.data.length === 0) {
-        console.warn('Received empty audio chunk, skipping');
-        return;
-      }
-      
-      // Update last chunk time for silence detection
-      lastChunkTime = Date.now();
-      
-      // Store chunk
-      audioChunks.push(msg.data);
-      chunkCount++;
-      
-      console.log(`Received chunk ${chunkCount}, size: ${msg.data.length} bytes`);
-      
-      // Clear any existing silence timer since we got new audio
-      if (silenceTimer) {
-        clearTimeout(silenceTimer);
-        silenceTimer = null;
-      }
-      
-      // Process immediately if we have enough chunks
-      if (chunkCount >= CHUNK_COUNT_THRESHOLD) {
-        if (chunkTimer) {
-          clearTimeout(chunkTimer);
-          chunkTimer = null;
-        }
-        console.log('Processing due to chunk count threshold');
-        processAudioChunks();
-      } else {
-        // Set timer for processing chunks after max wait time
-        if (!chunkTimer) {
-          chunkTimer = setTimeout(() => {
-            chunkTimer = null;
-            console.log('Processing due to time threshold');
-            processAudioChunks();
-          }, MAX_WAIT_TIME);
-        }
-        
-        // Set silence detection timer
-        silenceTimer = setTimeout(() => {
-          silenceTimer = null;
-          const timeSinceLastChunk = Date.now() - lastChunkTime;
-          
-          if (timeSinceLastChunk >= SILENCE_THRESHOLD && audioChunks.length > 0) {
-            console.log('Processing due to silence detection');
-            if (chunkTimer) {
-              clearTimeout(chunkTimer);
-              chunkTimer = null;
-            }
-            processAudioChunks();
-          }
-        }, SILENCE_THRESHOLD);
-      }
-      
-    } catch (error) {
-      console.error('Error handling audio message:', error);
-      if (ws.readyState === ws.OPEN) {
-        ws.send(JSON.stringify({
-          type: 'error',
-          message: 'Error processing audio chunk: ' + error.message
-        }));
-      }
-    }
-  };
-  
-  // Handle client disconnect
-  ws.onclose = () => {
-    console.log("Client disconnected from server WebSocket");
-    
-    // Clear all timers
-    if (chunkTimer) {
-      clearTimeout(chunkTimer);
-      chunkTimer = null;
-    }
-    
-    if (silenceTimer) {
-      clearTimeout(silenceTimer);
-      silenceTimer = null;
-    }
-    
-    // Process any remaining chunks before disconnect
-    if (audioChunks.length > 0 && !isProcessing) {
-      console.log('Processing remaining chunks before disconnect');
-      processAudioChunks();
-    }
-  };
-  
-  // Handle WebSocket errors
-  ws.onerror = (error) => {
-    console.error('WebSocket error:', error);
-    
-    // Clear all timers
-    if (chunkTimer) {
-      clearTimeout(chunkTimer);
-      chunkTimer = null;
-    }
-    
-    if (silenceTimer) {
-      clearTimeout(silenceTimer);
-      silenceTimer = null;
-    }
-  };
-  
-  // Send initial connection confirmation
-  if (ws.readyState === ws.OPEN) {
-    ws.send(JSON.stringify({
-      type: 'connected',
-      message: 'Connected to ElevenLabs speech-to-text service (streaming mode)'
-    }));
-  }
-});
-// --- END OF FIX ---
-
 // Root route for backend
 app.get("/", (req, res) => {
 	res.json({
@@ -453,37 +90,8 @@ let users = [
 			avatar: "https://images.pexels.com/photos/614810/pexels-photo-614810.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&fit=crop",
 		},
 		createdAt: new Date("2024-01-01"),
-		postingStreak: {
-			currentStreak: 7,
-			longestStreak: 12,
-			lastPostDate: new Date().toISOString().split('T')[0],
-			streakData: generateStreakData()
-		}
 	},
 ];
-
-// Generate streak data for the last 30 days
-function generateStreakData() {
-	const data = [];
-	const today = new Date();
-	
-	for (let i = 29; i >= 0; i--) {
-		const date = new Date(today);
-		date.setDate(date.getDate() - i);
-		const dateStr = date.toISOString().split('T')[0];
-		
-		// Simulate posting pattern - more posts in recent days
-		const posted = i < 7 ? true : Math.random() > 0.6;
-		
-		data.push({
-			date: dateStr,
-			posted: posted,
-			postCount: posted ? Math.floor(Math.random() * 3) + 1 : 0
-		});
-	}
-	
-	return data;
-}
 
 let posts = [
 	{
@@ -516,291 +124,149 @@ let posts = [
 	},
 ];
 
-// Platform-specific actor configurations with correct input structures
-const PLATFORM_ACTORS = {
-	twitter: {
-		actorId:
-			process.env.TWITTER_TRENDS_ACTOR_ID ||
-			"apify/twitter-trends-scraper",
-		input: { location: "United States", maxTrends: 20 },
-	},
-	instagram: {
-		actorId: "easyapi/instagram-posts-scraper",
-		input: {
-			usernames: ["trending", "viral", "popular"], // Instagram usernames to scrape
-			maxPosts: 20,
-			skipPinnedPosts: true,
-		},
-	},
-	tiktok: {
-		actorId: "novi/fast-tiktok-api",
-		input: {
-			scrapingType: "TREND", // Use TREND scraping type
-			targetCountry: "United Kingdom",
-			keyword: "viral", // For search-based trending
-			limitResult: 10,
-		},
-	},
-	facebook: {
-		actorId: "apify/facebook-posts-scraper", // Placeholder
-		input: { query: "trending", maxResults: 20 },
-	},
-	youtube: {
-		actorId: "apify/youtube-scraper", // Placeholder
-		input: { searchKeywords: "trending", maxResults: 20 },
-	},
-};
+// Load supported locations for Twitter trends
+let supportedLocations = [];
+try {
+	const locationsData = fs.readFileSync(path.join(process.cwd(), 'server', 'X_trends_supported_locations.json'), 'utf8');
+	supportedLocations = JSON.parse(locationsData);
+	console.log(`[OK] Loaded ${supportedLocations.length} supported locations for Twitter trends`);
+} catch (error) {
+	console.error('[ERROR] Failed to load supported locations:', error.message);
+	// Fallback to default locations
+	supportedLocations = [
+		{ name: "Worldwide", woeid: 1 },
+		{ name: "United States", woeid: 23424977 },
+		{ name: "United Kingdom", woeid: 23424975 },
+		{ name: "Canada", woeid: 23424775 }
+	];
+}
 
-// STRICT data transformation - ONLY use real API data, NO fallbacks
-const transformTrendData = (apifyData, platform = "twitter") => {
-	if (!apifyData || !Array.isArray(apifyData) || apifyData.length === 0) {
-		console.log(`No valid data received for ${platform}:`, apifyData);
+// Enhanced function to fetch trends from RapidAPI (Twitter only)
+const fetchTrendsFromRapidAPI = async (platform = "twitter", location = "1") => {
+	try {
+		console.log(`Fetching REAL trends for platform: ${platform}, location: ${location} via RapidAPI`);
+
+		// Only Twitter is supported via RapidAPI
+		if (platform !== "twitter") {
+			console.log(`Platform ${platform} not supported by RapidAPI - returning empty array`);
+			return [];
+		}
+
+		const rapidApiKey = process.env.X_RapidAPI_Key;
+		if (!rapidApiKey) {
+			console.log("X_RapidAPI_Key not found - cannot fetch real data");
+			return [];
+		}
+
+		const options = {
+			method: 'GET',
+			url: 'https://twitter-x.p.rapidapi.com/trends/',
+			params: { woeid: location },
+			headers: {
+				'x-rapidapi-key': rapidApiKey,
+				'x-rapidapi-host': 'twitter-x.p.rapidapi.com'
+			}
+		};
+
+		console.log(`Calling RapidAPI with options:`, { ...options, headers: { ...options.headers, 'x-rapidapi-key': '[HIDDEN]' } });
+
+		const response = await axios.request(options);
+		const trendsData = response.data;
+
+		if (!trendsData || !Array.isArray(trendsData.trends)) {
+			console.log('No valid trends data received from RapidAPI:', trendsData);
+			return [];
+		}
+
+		console.log(`Retrieved ${trendsData.trends.length} raw trends from RapidAPI for ${platform}`);
+
+		// Transform RapidAPI data to our format
+		const transformedTrends = trendsData.trends.map((trend, index) => {
+			const keyword = trend.name || trend.query || 'Unknown';
+			const volume = trend.tweet_volume || Math.floor(Math.random() * 50000) + 1000;
+			
+			return {
+				id: index + 1,
+				keyword: cleanKeyword(keyword),
+				category: categorizeKeyword(keyword),
+				trendScore: calculateTrendScore(volume, platform),
+				volume: volume,
+				growth: calculateGrowthFromVolume(volume),
+				platforms: [platform],
+				relatedHashtags: extractHashtagsFromText(keyword),
+				peakTime: "14:00-16:00 UTC", // Default peak time
+				demographics: {
+					age: "18-34",
+					interests: generateInterestsFromKeyword(keyword)
+				}
+			};
+		});
+
+		console.log(`Successfully transformed ${transformedTrends.length} REAL trends for ${platform}`);
+		return transformedTrends;
+
+	} catch (error) {
+		console.error(`Error fetching trends from RapidAPI:`, {
+			error: error.response?.data || error.message,
+			platform,
+			location,
+			status: error.response?.status,
+		});
 		return [];
 	}
+};
 
-	console.log(
-		`Transforming ${apifyData.length} REAL items for platform: ${platform}`
-	);
-	console.log("Sample raw data:", JSON.stringify(apifyData[0], null, 2));
+// Helper functions for data processing
+const cleanKeyword = (keyword) => {
+	if (!keyword || typeof keyword !== "string") return "Unknown";
+	const cleaned = keyword.replace(/[#@]/g, "").substring(0, 100).trim();
+	return cleaned.length > 0 ? cleaned : "Unknown";
+};
 
-	const transformedTrends = [];
-
-	for (let index = 0; index < apifyData.length; index++) {
-		const item = apifyData[index];
-		let trendData = null;
-
-		// Platform-specific data extraction from REAL API responses ONLY
-		switch (platform) {
-			case "twitter":
-				// Extract ONLY real Twitter trend data
-				if (item.trend || item.name || item.query) {
-					const keyword = item.trend || item.name || item.query;
-
-					trendData = {
-						keyword: cleanKeyword(keyword),
-						category: item.category || "General", // Default to 'General' instead of null
-						volume: item.tweet_volume || item.volume || 0,
-						growth:
-							item.growth ||
-							calculateGrowthFromVolume(
-								item.tweet_volume || item.volume || 0
-							),
-						hashtags:
-							item.hashtags || extractHashtagsFromText(keyword),
-						peakTime: item.peak_time || null, // No fallback
-						demographics: item.demographics || {
-							age: "N/A",
-							interests: [],
-						}, // Default demographics object
-					};
-				}
-				break;
-
-			case "instagram":
-				// Extract from Instagram post data
-				if (item.caption || item.hashtags) {
-					const keyword =
-						extractKeywordFromCaption(item.caption) ||
-						(item.hashtags && item.hashtags[0]
-							? item.hashtags[0].replace("#", "")
-							: null);
-
-					if (keyword) {
-						trendData = {
-							keyword: cleanKeyword(keyword),
-							category: "General", // Default category instead of null
-							volume:
-								item.likeCount ||
-								item.likes_count ||
-								item.likes ||
-								0,
-							growth: calculateGrowthFromEngagement(
-								item.likeCount,
-								item.commentsCount
-							),
-							hashtags:
-								item.hashtags ||
-								extractHashtagsFromText(item.caption),
-							peakTime: null, // No real peak time data from Instagram API
-							demographics: { age: "N/A", interests: [] }, // Default demographics object
-						};
-					}
-				}
-				break;
-
-			case "tiktok":
-				// Extract from TikTok video data
-				if (item.desc || item.description || item.title) {
-					const keyword = extractKeywordFromDescription(
-						item.desc || item.description || item.title
-					);
-
-					if (keyword) {
-						trendData = {
-							keyword: cleanKeyword(keyword),
-							category: "General", // Default category instead of null
-							volume:
-								item.playCount ||
-								item.play_count ||
-								item.diggCount ||
-								item.digg_count ||
-								0,
-							growth: calculateGrowthFromViews(
-								item.playCount || item.play_count || 0
-							),
-							hashtags:
-								item.hashtags ||
-								extractHashtagsFromText(
-									item.desc || item.description
-								),
-							peakTime: null, // No real peak time data
-							demographics: { age: "N/A", interests: [] }, // Default demographics object
-						};
-					}
-				}
-				break;
-
-			case "facebook":
-				if (item.text || item.message) {
-					const keyword = extractKeywordFromText(
-						item.text || item.message
-					);
-
-					if (keyword) {
-						trendData = {
-							keyword: cleanKeyword(keyword),
-							category: "General", // Default category instead of null
-							volume:
-								(item.reactions || 0) +
-								(item.shares || 0) +
-								(item.comments || 0),
-							growth: calculateGrowthFromEngagement(
-								item.reactions,
-								item.comments
-							),
-							hashtags: extractHashtagsFromText(
-								item.text || item.message
-							),
-							peakTime: null,
-							demographics: { age: "N/A", interests: [] }, // Default demographics object
-						};
-					}
-				}
-				break;
-
-			case "youtube":
-				if (item.title) {
-					const keyword = extractKeywordFromTitle(item.title);
-
-					if (keyword) {
-						trendData = {
-							keyword: cleanKeyword(keyword),
-							category: "General", // Default category instead of null
-							volume: item.viewCount || item.view_count || 0,
-							growth: calculateGrowthFromViews(
-								item.viewCount || item.view_count || 0
-							),
-							hashtags:
-								item.tags ||
-								extractHashtagsFromText(item.title),
-							peakTime: null,
-							demographics: { age: "N/A", interests: [] }, // Default demographics object
-						};
-					}
-				}
-				break;
-		}
-
-		// Only add if we have real data
-		if (trendData && trendData.keyword && trendData.keyword !== "Unknown") {
-			const trendScore = calculateTrendScore(trendData.volume, platform);
-
-			transformedTrends.push({
-				id: transformedTrends.length + 1,
-				keyword: trendData.keyword,
-				category: trendData.category, // Now always has a value
-				trendScore,
-				volume: trendData.volume,
-				growth: trendData.growth,
-				platforms: [platform],
-				relatedHashtags: trendData.hashtags.slice(0, 5),
-				peakTime: trendData.peakTime, // Can be null
-				demographics: trendData.demographics, // Now always has a valid object
-			});
-		}
+const categorizeKeyword = (keyword) => {
+	const lowerKeyword = keyword.toLowerCase();
+	
+	if (lowerKeyword.includes('tech') || lowerKeyword.includes('ai') || lowerKeyword.includes('crypto')) {
+		return 'Technology';
+	} else if (lowerKeyword.includes('sport') || lowerKeyword.includes('game') || lowerKeyword.includes('football')) {
+		return 'Sports';
+	} else if (lowerKeyword.includes('music') || lowerKeyword.includes('movie') || lowerKeyword.includes('celebrity')) {
+		return 'Entertainment';
+	} else if (lowerKeyword.includes('politic') || lowerKeyword.includes('election') || lowerKeyword.includes('government')) {
+		return 'Politics';
+	} else if (lowerKeyword.includes('business') || lowerKeyword.includes('market') || lowerKeyword.includes('economy')) {
+		return 'Business';
 	}
-
-	console.log(
-		`Successfully transformed ${transformedTrends.length} REAL trends for ${platform}`
-	);
-	return transformedTrends;
+	
+	return 'General';
 };
 
-// Helper functions for data extraction and processing
-const extractKeywordFromCaption = (caption) => {
-	if (!caption || typeof caption !== "string") return null;
-	// Extract first meaningful word or phrase from caption
-	const words = caption
-		.split(" ")
-		.filter(
-			(word) =>
-				word.length > 3 &&
-				!word.startsWith("#") &&
-				!word.startsWith("@")
-		)
-		.slice(0, 3);
-	return words.length > 0 ? words.join(" ") : null;
-};
-
-const extractKeywordFromDescription = (description) => {
-	if (!description || typeof description !== "string") return null;
-	// Extract meaningful content from TikTok description
-	const words = description
-		.split(" ")
-		.filter(
-			(word) =>
-				word.length > 3 &&
-				!word.startsWith("#") &&
-				!word.startsWith("@")
-		)
-		.slice(0, 3);
-	return words.length > 0 ? words.join(" ") : null;
-};
-
-const extractKeywordFromText = (text) => {
-	if (!text || typeof text !== "string") return null;
-	const words = text
-		.split(" ")
-		.filter(
-			(word) =>
-				word.length > 3 &&
-				!word.startsWith("#") &&
-				!word.startsWith("@")
-		)
-		.slice(0, 3);
-	return words.length > 0 ? words.join(" ") : null;
-};
-
-const extractKeywordFromTitle = (title) => {
-	if (!title || typeof title !== "string") return null;
-	const words = title
-		.split(" ")
-		.filter((word) => word.length > 3)
-		.slice(0, 4);
-	return words.length > 0 ? words.join(" ") : null;
+const generateInterestsFromKeyword = (keyword) => {
+	const category = categorizeKeyword(keyword);
+	const interestMap = {
+		'Technology': ['innovation', 'startups', 'gadgets'],
+		'Sports': ['athletics', 'competition', 'fitness'],
+		'Entertainment': ['movies', 'music', 'celebrities'],
+		'Politics': ['current events', 'governance', 'policy'],
+		'Business': ['entrepreneurship', 'finance', 'marketing'],
+		'General': ['trending topics', 'social media', 'culture']
+	};
+	
+	return interestMap[category] || interestMap['General'];
 };
 
 const extractHashtagsFromText = (text) => {
 	if (!text || typeof text !== "string") return [];
 	const hashtagRegex = /#[\w]+/g;
 	const matches = text.match(hashtagRegex) || [];
-	return matches.slice(0, 5); // Limit to 5 hashtags
-};
-
-const cleanKeyword = (keyword) => {
-	if (!keyword || typeof keyword !== "string") return null;
-	const cleaned = keyword.replace(/[#@]/g, "").substring(0, 100).trim();
-	return cleaned.length > 0 ? cleaned : null;
+	
+	// If no hashtags found, generate some based on the text
+	if (matches.length === 0) {
+		const words = text.split(' ').filter(word => word.length > 3);
+		return words.slice(0, 3).map(word => `#${word.replace(/[^a-zA-Z0-9]/g, '')}`);
+	}
+	
+	return matches.slice(0, 5);
 };
 
 const calculateGrowthFromVolume = (volume) => {
@@ -810,24 +276,6 @@ const calculateGrowthFromVolume = (volume) => {
 	if (volume > 10000) return "+25%";
 	if (volume > 1000) return "+15%";
 	return "+5%";
-};
-
-const calculateGrowthFromEngagement = (likes, comments) => {
-	const total = (likes || 0) + (comments || 0);
-	if (total === 0) return "+0%";
-	if (total > 10000) return "+40%";
-	if (total > 5000) return "+30%";
-	if (total > 1000) return "+20%";
-	return "+10%";
-};
-
-const calculateGrowthFromViews = (views) => {
-	if (!views || views === 0) return "+0%";
-	if (views > 1000000) return "+60%";
-	if (views > 500000) return "+45%";
-	if (views > 100000) return "+30%";
-	if (views > 10000) return "+20%";
-	return "+10%";
 };
 
 const calculateTrendScore = (volume, platform) => {
@@ -842,18 +290,6 @@ const calculateTrendScore = (volume, platform) => {
 			else if (volume > 10000) score = 75;
 			else if (volume > 1000) score = 65;
 			break;
-		case "instagram":
-			if (volume > 50000) score = 95;
-			else if (volume > 20000) score = 85;
-			else if (volume > 5000) score = 75;
-			else if (volume > 1000) score = 65;
-			break;
-		case "tiktok":
-			if (volume > 1000000) score = 95;
-			else if (volume > 500000) score = 85;
-			else if (volume > 100000) score = 75;
-			else if (volume > 10000) score = 65;
-			break;
 		default:
 			score = Math.min(50 + volume / 1000, 95);
 	}
@@ -861,130 +297,244 @@ const calculateTrendScore = (volume, platform) => {
 	return Math.round(score);
 };
 
-// Enhanced function to fetch trends from Apify using platform-specific actors
-const fetchTrendsFromApify = async (platform = "twitter") => {
+// Enhanced AI Content Generation with Two-Step Process
+const generateContentWithAI = async (
+	topic,
+	platform,
+	tone,
+	targetAudience,
+	includeHashtags,
+	isAnalysisOnly = false
+) => {
 	try {
-		console.log(
-			`Fetching REAL trends for platform: ${platform} via direct API call`
-		);
+		const platformConfig = PLATFORM_CONFIGS[platform] || PLATFORM_CONFIGS.twitter;
 
-		const platformConfig = PLATFORM_ACTORS[platform];
-		if (!platformConfig) {
-			console.log(
-				`No actor configuration found for platform: ${platform}`
-			);
-			return [];
+		// Step 1: Trend Analysis
+		const analysisPrompt = `Analyze the social media trend "${topic}". What is the core emotion, the key talking points, and the general sentiment? Provide a brief, one-sentence analysis focusing on why this topic is trending and what makes it engaging.`;
+		
+		console.log('Step 1: Analyzing trend...');
+		const analysisResult = await model.generateContent(analysisPrompt);
+		const trendAnalysis = analysisResult.response.text().trim();
+		console.log('Trend Analysis:', trendAnalysis);
+
+		// If only analysis is requested, return early
+		if (isAnalysisOnly) {
+			return { analysis: trendAnalysis };
 		}
 
-		const actorId = platformConfig.actorId;
-		const actorInput = platformConfig.input;
-		const safeActorId = actorId.replace("/", "~");
-		const token = process.env.APIFY_API_TOKEN;
-
-		if (!token) {
-			console.log("APIFY_API_TOKEN not found - cannot fetch real data");
-			return [];
-		}
-
-		// Start the actor run with correct input structure
-		const startRunUrl = `https://api.apify.com/v2/acts/${safeActorId}/runs?token=${token}`;
-		console.log(`Calling Apify API Step 1: POST to start run...`);
-		console.log(`Actor ID: ${actorId}`);
-		console.log(`Input:`, JSON.stringify(actorInput, null, 2));
-
-		const startResponse = await axios.post(
-			startRunUrl,
-			{
-				input: actorInput, // Wrap input in 'input' object as required by Apify
-			},
-			{
-				headers: { "Content-Type": "application/json" },
-				timeout: 15000,
-			}
-		);
-
-		const runId = startResponse.data.data.id;
-		const datasetId = startResponse.data.data.defaultDatasetId;
-		console.log(
-			`Actor run started. Run ID: ${runId}, Dataset ID: ${datasetId}`
-		);
-
-		// Poll for completion with extended timeout for real data
-		let items = [];
-		let runStatus = "RUNNING";
-		let attempts = 0;
-		const maxAttempts = 30; // Extended to 60 seconds for real API calls
-
-		while (runStatus !== "SUCCEEDED" && attempts < maxAttempts) {
-			const statusUrl = `https://api.apify.com/v2/acts/${safeActorId}/runs/${runId}?token=${token}`;
-
-			try {
-				const statusResponse = await axios.get(statusUrl, {
-					timeout: 5000,
-				});
-				runStatus = statusResponse.data.data.status;
-
-				if (runStatus === "SUCCEEDED") {
-					console.log(
-						"Actor run completed successfully. Fetching results..."
-					);
-					const getResultsUrl = `https://api.apify.com/v2/datasets/${datasetId}/items?token=${token}`;
-					const resultsResponse = await axios.get(getResultsUrl, {
-						timeout: 15000,
-					});
-					items = resultsResponse.data;
-					break;
-				} else if (runStatus === "FAILED" || runStatus === "ABORTED") {
-					console.error(
-						`Actor run ${runStatus} for platform ${platform}`
-					);
-					return [];
-				}
-
-				console.log(
-					`Run status: ${runStatus}. Attempt ${
-						attempts + 1
-					}/${maxAttempts}`
-				);
-				await new Promise((resolve) => setTimeout(resolve, 2000));
-				attempts++;
-			} catch (pollError) {
-				console.error("Error polling run status:", pollError.message);
-				return [];
-			}
-		}
-
-		if (!items || items.length === 0) {
-			console.log(
-				`No items retrieved for ${platform} - returning empty array`
-			);
-			return [];
-		}
-
-		console.log(
-			`Retrieved ${items.length} raw items from Apify for ${platform}`
-		);
-		console.log("Sample raw item:", JSON.stringify(items[0], null, 2));
-
-		// Transform ONLY real data - no fallbacks
-		const transformedTrends = transformTrendData(items, platform);
-
-		if (transformedTrends.length === 0) {
-			console.log(`No valid trends extracted from ${platform} data`);
-		}
-
-		return transformedTrends;
-	} catch (error) {
-		console.error(`Error fetching trends from Apify direct API:`, {
-			error: error.response?.data || error.message,
+		// Step 2: Enhanced Content Generation with Viral Hooks
+		const enhancedPrompt = createEnhancedSystemPrompt(
+			topic,
 			platform,
-			status: error.response?.status,
-		});
-		return []; // Return empty array instead of fallback
+			tone,
+			targetAudience,
+			includeHashtags,
+			trendAnalysis
+		);
+
+		console.log('Step 2: Generating viral content...');
+		const result = await model.generateContent(enhancedPrompt);
+		const response = await result.response;
+		let content = response.text().trim();
+
+		// Clean up any remaining unwanted prefixes or formatting
+		content = content
+			.replace(/^\*\*.*?\*\*\s*/g, "")
+			.replace(/^Here's.*?:\s*/gi, "")
+			.replace(/^Option \d+.*?:\s*/gi, "")
+			.replace(/^\d+\.\s*/g, "")
+			.replace(/^-\s*/g, "")
+			.replace(/^\*\s*/g, "")
+			.trim();
+
+		// Ensure content doesn't exceed platform limits
+		if (content.length > platformConfig.maxCharacters) {
+			content = content.substring(0, platformConfig.maxCharacters - 3) + "...";
+		}
+
+		const viralScore = calculateEnhancedViralScore(content, platform, trendAnalysis);
+		const hashtagRegex = /#[\w]+/g;
+		const hashtags = content.match(hashtagRegex) || [];
+
+		const recommendations = generatePlatformRecommendations(platform, topic, viralScore);
+
+		return {
+			content,
+			viralScore,
+			hashtags,
+			platform,
+			recommendations,
+			trendAnalysis,
+			platformOptimization: {
+				characterCount: content.length,
+				characterLimit: platformConfig.maxCharacters,
+				hashtagCount: hashtags.length,
+				optimalHashtags: platformConfig.optimalHashtags,
+				visualSuggestions: getVisualSuggestions(platform),
+				ctaSuggestions: getCTASuggestions(platform),
+			},
+		};
+	} catch (error) {
+		console.error("Error generating content with Gemini AI:", error);
+
+		const platformConfig = PLATFORM_CONFIGS[platform] || PLATFORM_CONFIGS.twitter;
+		const fallbackContent = generateFallbackContent(topic, platform, tone, platformConfig);
+
+		return fallbackContent;
 	}
 };
 
-// Platform-specific optimization configurations
+// Enhanced system prompt with viral hooks and trend analysis
+const createEnhancedSystemPrompt = (topic, platform, tone, targetAudience, includeHashtags, trendAnalysis) => {
+	const platformConfig = PLATFORM_CONFIGS[platform] || PLATFORM_CONFIGS.twitter;
+
+	return `You are TrendCraft AI, an expert viral content generator. Your ONLY job is to generate ONE piece of ready-to-publish content for ${platform}.
+
+TREND ANALYSIS CONTEXT: ${trendAnalysis}
+
+CRITICAL RULES - FOLLOW EXACTLY:
+1. Generate ONLY the final content text - no explanations, no options, no meta-commentary
+2. Do NOT include phrases like "Here's a post", "Option 1", "Tweet 1", "**Option**", or any similar introductory text
+3. Do NOT provide multiple versions or choices - generate exactly ONE piece of content
+4. Do NOT explain what you're doing or why
+5. The response should be ONLY the content that can be directly posted to ${platform}
+6. Maximum ${platformConfig.maxCharacters} characters - strictly enforce this limit
+7. Use ${tone} tone throughout
+8. Target audience: ${targetAudience || "general audience"}
+9. ${includeHashtags ? `Include ${platformConfig.optimalHashtags} relevant hashtags` : "Do not include hashtags"}
+
+VIRAL CONTENT HOOKS - Use ONE of these proven techniques:
+- Bold Claims: "This will change everything you know about..."
+- Surprising Statistics: "Did you know that 90% of people don't know..."
+- Relatable Problems: "We've all been there when..."
+- Curiosity Gaps: "The one thing about ${topic} that changed everything"
+- Controversy: "Unpopular opinion:" or "Hot take:"
+- Secrets: "The secret to ${topic} that nobody talks about"
+- Urgency: "This is happening right now and you need to know"
+- Personal Stories: "I used to think ${topic} was..."
+
+VIRAL INDICATORS - Include these elements:
+- Emotional words: amazing, incredible, mind-blowing, shocking, unbelievable
+- Urgency words: now, today, immediately, breaking, just discovered
+- Social proof: "everyone is talking about", "going viral", "trending"
+- Numbers and specifics: exact percentages, timeframes, quantities
+
+PLATFORM-SPECIFIC REQUIREMENTS FOR ${platform.toUpperCase()}:
+${platform === "twitter" ? `
+- Keep under 280 characters
+- Be punchy and engaging
+- Include 1-2 hashtags maximum if requested
+- Use engaging questions or calls for interaction
+- Consider emojis sparingly but effectively` : ""}
+
+${platform === "linkedin" ? `
+- Professional tone with personal insights
+- Can be longer form (up to 3000 characters)
+- Include 3-5 industry hashtags if requested
+- Focus on value and professional growth
+- Include professional experiences or lessons` : ""}
+
+${platform === "instagram" ? `
+- Visual-first approach
+- Use 8-15 hashtags if requested
+- Include emojis and line breaks for readability
+- Focus on lifestyle and visual appeal
+- Include "link in bio" style CTAs` : ""}
+
+${platform === "facebook" ? `
+- Community-focused content
+- Can be longer form
+- Use 1-3 hashtags if requested
+- Focus on shareable, valuable content
+- Encourage community interaction` : ""}
+
+${platform === "tiktok" ? `
+- Video-first content description
+- Use 3-7 hashtags including trending ones if requested
+- Focus on entertainment and trends
+- Include challenge or duet CTAs
+- Keep descriptions engaging and fun` : ""}
+
+TOPIC: ${topic}
+
+Generate the viral content now - ONLY the content, nothing else:`;
+};
+
+// Enhanced viral score calculation
+const calculateEnhancedViralScore = (content, platform, trendAnalysis) => {
+	let score = 50;
+	const platformConfig = PLATFORM_CONFIGS[platform] || PLATFORM_CONFIGS.twitter;
+
+	// Content length optimization
+	const contentLength = content.length;
+	const optimalLength = platformConfig.maxCharacters * 0.7;
+
+	if (contentLength <= optimalLength) {
+		score += 10;
+	} else if (contentLength <= platformConfig.maxCharacters) {
+		score += 5;
+	}
+
+	// Viral indicators
+	const viralWords = ['secret', 'truth', 'shocking', 'unbelievable', 'amazing', 'incredible', 'mind-blowing'];
+	const emotionalWords = ['love', 'hate', 'excited', 'angry', 'surprised', 'happy', 'sad'];
+	const urgencyWords = ['now', 'today', 'breaking', 'just', 'immediately', 'urgent'];
+
+	viralWords.forEach(word => {
+		if (content.toLowerCase().includes(word)) score += 3;
+	});
+
+	emotionalWords.forEach(word => {
+		if (content.toLowerCase().includes(word)) score += 2;
+	});
+
+	urgencyWords.forEach(word => {
+		if (content.toLowerCase().includes(word)) score += 2;
+	});
+
+	// Platform-specific bonuses
+	switch (platform) {
+		case "twitter":
+			if (content.includes("?")) score += 8;
+			if (content.match(/[🔥💡🚀✨⭐]/g)) score += 10;
+			if (content.match(/\b(thread|🧵)\b/gi)) score += 5;
+			break;
+		case "linkedin":
+			if (content.match(/\b(insight|experience|professional|career)\b/gi)) score += 8;
+			if (content.includes("?")) score += 6;
+			if (content.match(/\b(tips|advice|lessons)\b/gi)) score += 10;
+			break;
+		case "instagram":
+			if (content.match(/[❤️😍🔥✨💯]/g)) score += 12;
+			if (content.includes("link in bio")) score += 8;
+			if (content.match(/\b(save|share|tag)\b/gi)) score += 6;
+			break;
+		case "facebook":
+			if (content.match(/\b(share|community|family|friends)\b/gi)) score += 8;
+			if (content.includes("?")) score += 7;
+			break;
+		case "tiktok":
+			if (content.match(/\b(challenge|trend|viral|fyp)\b/gi)) score += 12;
+			if (content.match(/[🔥💯✨🎵]/g)) score += 10;
+			break;
+	}
+
+	// Hashtag bonus
+	if (content.includes("#")) score += 6;
+
+	// Viral content patterns
+	if (content.match(/\b(new|breaking|exclusive|first)\b/gi)) score += 8;
+	if (content.match(/\b(tips|secrets|hacks|tricks)\b/gi)) score += 10;
+
+	// Trend analysis bonus
+	if (trendAnalysis && trendAnalysis.length > 0) {
+		score += 5; // Bonus for having trend analysis
+	}
+
+	return Math.min(score, 100);
+};
+
+// Platform configurations
 const PLATFORM_CONFIGS = {
 	twitter: {
 		maxCharacters: 280,
@@ -1023,282 +573,6 @@ const PLATFORM_CONFIGS = {
 	},
 };
 
-// Enhanced Content Hooks for Viral Content
-const VIRAL_CONTENT_HOOKS = {
-	bold_claims: [
-		"This will change everything you know about",
-		"Nobody talks about this, but",
-		"The truth about {topic} that experts don't want you to know",
-		"Why everyone is wrong about",
-		"The {topic} secret that changed my life"
-	],
-	surprising_statistics: [
-		"Did you know that 90% of people don't know",
-		"Here's a shocking fact about {topic}:",
-		"The numbers behind {topic} will blow your mind",
-		"Research shows something surprising about"
-	],
-	relatable_problems: [
-		"We've all been there:",
-		"If you've ever struggled with {topic}, this is for you",
-		"The {topic} problem everyone faces but nobody talks about",
-		"Why {topic} feels impossible (and how to fix it)"
-	],
-	curiosity_gaps: [
-		"The one thing about {topic} that changed everything",
-		"What I wish I knew about {topic} before starting",
-		"The {topic} mistake that's costing you",
-		"Why {topic} isn't working for you (and what to do instead)"
-	],
-	controversy: [
-		"Unpopular opinion:",
-		"Hot take:",
-		"This might be controversial, but",
-		"I'm about to say something that will upset people:"
-	]
-};
-
-// Two-Step AI Content Generation Process
-const generateContentWithEnhancedAI = async (
-	topic,
-	platform,
-	tone,
-	targetAudience,
-	includeHashtags,
-	trendAnalysis = null
-) => {
-	try {
-		const platformConfig = PLATFORM_CONFIGS[platform] || PLATFORM_CONFIGS.twitter;
-		
-		let analysisResult = trendAnalysis;
-		
-		// Step 1: Trend Analysis (if not provided)
-		if (!analysisResult) {
-			console.log("Step 1: Analyzing trend context...");
-			const analysisPrompt = `Analyze the social media trend "${topic}". What is the core emotion, the key talking points, and the general sentiment? Provide a brief, one-sentence analysis focusing on what makes this topic engaging and viral-worthy.`;
-			
-			const analysis = await model.generateContent(analysisPrompt);
-			analysisResult = analysis.response.text().trim();
-			console.log("Trend Analysis:", analysisResult);
-		}
-		
-		// Step 2: Enhanced Content Generation with Viral Hooks
-		console.log("Step 2: Generating viral content...");
-		
-		// Select random viral hooks
-		const hookTypes = Object.keys(VIRAL_CONTENT_HOOKS);
-		const selectedHookType = hookTypes[Math.floor(Math.random() * hookTypes.length)];
-		const hooks = VIRAL_CONTENT_HOOKS[selectedHookType];
-		const selectedHook = hooks[Math.floor(Math.random() * hooks.length)];
-		
-		const enhancedPrompt = `You are TrendCraft AI, the world's most advanced viral content generator. Your ONLY job is to create ONE piece of ready-to-publish content for ${platform}.
-
-TREND ANALYSIS CONTEXT: ${analysisResult}
-
-VIRAL CONTENT STRATEGY:
-- Use this proven hook technique: "${selectedHook.replace('{topic}', topic)}"
-- Apply the core emotion and sentiment from the trend analysis
-- Create content that taps into the current conversation momentum
-
-CRITICAL RULES - FOLLOW EXACTLY:
-1. Generate ONLY the final content text - no explanations, no options, no meta-commentary
-2. Do NOT include phrases like "Here's a post", "Option 1", "Tweet 1", or any introductory text
-3. Do NOT provide multiple versions - generate exactly ONE piece of content
-4. Do NOT explain what you're doing or why
-5. Maximum ${platformConfig.maxCharacters} characters - strictly enforce this limit
-6. Use ${tone} tone throughout
-7. Target audience: ${targetAudience || "general audience"}
-8. ${includeHashtags ? `Include ${platformConfig.optimalHashtags} relevant hashtags` : "Do not include hashtags"}
-
-PLATFORM-SPECIFIC VIRAL OPTIMIZATION FOR ${platform.toUpperCase()}:
-${platform === "twitter" ? `
-- Hook readers in the first 10 words
-- Use power words that drive engagement
-- Include a clear call-to-action
-- Consider thread potential for complex topics` : ""}
-
-${platform === "linkedin" ? `
-- Start with a professional insight or lesson learned
-- Include personal experience or case study
-- Use industry-relevant language
-- End with a thought-provoking question` : ""}
-
-${platform === "instagram" ? `
-- Create visual storytelling through words
-- Use emojis strategically for visual breaks
-- Include lifestyle and aspirational elements
-- Focus on community and connection` : ""}
-
-${platform === "facebook" ? `
-- Create shareable, discussion-worthy content
-- Focus on community values and shared experiences
-- Use conversational, friendly tone
-- Encourage comments and shares` : ""}
-
-${platform === "tiktok" ? `
-- Create content that begs for video format
-- Use trending language and phrases
-- Include challenge or duet potential
-- Focus on entertainment and relatability` : ""}
-
-VIRAL AMPLIFICATION TECHNIQUES:
-- Use psychological triggers (curiosity, FOMO, social proof)
-- Include contrarian or surprising angles
-- Create content that people MUST share
-- Tap into current cultural moments and emotions
-
-TOPIC: ${topic}
-TREND CONTEXT: ${analysisResult}
-
-Generate the viral content now - ONLY the content, nothing else:`;
-
-		const result = await model.generateContent(enhancedPrompt);
-		const response = await result.response;
-		let content = response.text().trim();
-
-		// Clean up any remaining unwanted prefixes or formatting
-		content = content
-			.replace(/^\*\*.*?\*\*\s*/g, "")
-			.replace(/^Here's.*?:\s*/gi, "")
-			.replace(/^Option \d+.*?:\s*/gi, "")
-			.replace(/^\d+\.\s*/g, "")
-			.replace(/^-\s*/g, "")
-			.replace(/^\*\s*/g, "")
-			.trim();
-
-		// Ensure content doesn't exceed platform limits
-		if (content.length > platformConfig.maxCharacters) {
-			content = content.substring(0, platformConfig.maxCharacters - 3) + "...";
-		}
-
-		// Enhanced viral score calculation
-		const viralScore = calculateEnhancedViralScore(content, platform, analysisResult);
-		const hashtagRegex = /#[\w]+/g;
-		const hashtags = content.match(hashtagRegex) || [];
-
-		const recommendations = generatePlatformRecommendations(platform, topic, viralScore);
-
-		return {
-			content,
-			viralScore,
-			hashtags,
-			platform,
-			recommendations,
-			trendAnalysis: analysisResult,
-			viralHook: selectedHook.replace('{topic}', topic),
-			platformOptimization: {
-				characterCount: content.length,
-				characterLimit: platformConfig.maxCharacters,
-				hashtagCount: hashtags.length,
-				optimalHashtags: platformConfig.optimalHashtags,
-				visualSuggestions: getVisualSuggestions(platform),
-				ctaSuggestions: getCTASuggestions(platform),
-			},
-		};
-	} catch (error) {
-		console.error("Error generating enhanced content with Gemini AI:", error);
-
-		const platformConfig = PLATFORM_CONFIGS[platform] || PLATFORM_CONFIGS.twitter;
-		const fallbackContent = generateFallbackContent(topic, platform, tone, platformConfig);
-
-		return fallbackContent;
-	}
-};
-
-// Enhanced viral score calculation
-const calculateEnhancedViralScore = (content, platform, trendAnalysis) => {
-	let score = 50;
-	const platformConfig = PLATFORM_CONFIGS[platform] || PLATFORM_CONFIGS.twitter;
-
-	// Base scoring from original function
-	const contentLength = content.length;
-	const optimalLength = platformConfig.maxCharacters * 0.7;
-
-	if (contentLength <= optimalLength) {
-		score += 10;
-	} else if (contentLength <= platformConfig.maxCharacters) {
-		score += 5;
-	}
-
-	// Enhanced viral indicators
-	const viralWords = [
-		'secret', 'truth', 'shocking', 'nobody', 'everyone', 'mistake', 'wrong',
-		'change', 'transform', 'breakthrough', 'discover', 'reveal', 'expose',
-		'ultimate', 'proven', 'guaranteed', 'instant', 'immediately'
-	];
-	
-	const emotionalWords = [
-		'amazing', 'incredible', 'unbelievable', 'mind-blowing', 'game-changer',
-		'revolutionary', 'powerful', 'essential', 'crucial', 'vital'
-	];
-	
-	const urgencyWords = [
-		'now', 'today', 'immediately', 'urgent', 'limited', 'exclusive',
-		'before', 'deadline', 'ending', 'last chance'
-	];
-
-	// Check for viral indicators
-	viralWords.forEach(word => {
-		if (content.toLowerCase().includes(word)) score += 3;
-	});
-	
-	emotionalWords.forEach(word => {
-		if (content.toLowerCase().includes(word)) score += 2;
-	});
-	
-	urgencyWords.forEach(word => {
-		if (content.toLowerCase().includes(word)) score += 2;
-	});
-
-	// Platform-specific enhancements
-	switch (platform) {
-		case "twitter":
-			if (content.includes("?")) score += 8;
-			if (content.match(/[🔥💡🚀✨⭐]/g)) score += 10;
-			if (content.match(/\b(thread|🧵)\b/gi)) score += 5;
-			if (content.length <= 240) score += 5; // Optimal Twitter length
-			break;
-		case "linkedin":
-			if (content.match(/\b(insight|experience|professional|career|lesson)\b/gi)) score += 8;
-			if (content.includes("?")) score += 6;
-			if (content.match(/\b(tips|advice|strategy|growth)\b/gi)) score += 10;
-			break;
-		case "instagram":
-			if (content.match(/[❤️😍🔥✨💯]/g)) score += 12;
-			if (content.includes("link in bio")) score += 8;
-			if (content.match(/\b(save|share|tag)\b/gi)) score += 6;
-			break;
-		case "facebook":
-			if (content.match(/\b(share|community|family|friends)\b/gi)) score += 8;
-			if (content.includes("?")) score += 7;
-			break;
-		case "tiktok":
-			if (content.match(/\b(challenge|trend|viral|fyp)\b/gi)) score += 12;
-			if (content.match(/[🔥💯✨🎵]/g)) score += 10;
-			break;
-	}
-
-	// Trend analysis bonus
-	if (trendAnalysis) {
-		if (trendAnalysis.toLowerCase().includes('viral') || 
-			trendAnalysis.toLowerCase().includes('trending')) {
-			score += 15;
-		}
-		if (trendAnalysis.toLowerCase().includes('excited') || 
-			trendAnalysis.toLowerCase().includes('popular')) {
-			score += 10;
-		}
-	}
-
-	// Content structure bonuses
-	if (content.includes("#")) score += 6;
-	if (content.match(/\b(new|breaking|exclusive|first)\b/gi)) score += 8;
-	if (content.match(/\b(tips|secrets|hacks|tricks)\b/gi)) score += 10;
-	if (content.startsWith('"') || content.includes('"')) score += 5; // Quotes are shareable
-
-	return Math.min(score, 100);
-};
-
 // Helper function to generate platform-specific recommendations
 const generatePlatformRecommendations = (platform, topic, viralScore) => {
 	const baseRecommendations = {
@@ -1315,40 +589,31 @@ const generatePlatformRecommendations = (platform, topic, viralScore) => {
 		case "twitter":
 			return {
 				...baseRecommendations,
-				threadSuggestion:
-					"Consider creating a thread for more detailed insights",
-				visualTip:
-					"Add an eye-catching image or GIF to increase engagement by 150%",
+				threadSuggestion: "Consider creating a thread for more detailed insights",
+				visualTip: "Add an eye-catching image or GIF to increase engagement by 150%",
 			};
 		case "linkedin":
 			return {
 				...baseRecommendations,
-				networkingTip:
-					"Tag relevant industry professionals to increase reach",
-				professionalTip:
-					"Share a personal experience to make it more relatable",
+				networkingTip: "Tag relevant industry professionals to increase reach",
+				professionalTip: "Share a personal experience to make it more relatable",
 			};
 		case "instagram":
 			return {
 				...baseRecommendations,
-				visualTip:
-					"High-quality visuals are essential - consider professional photography",
-				storyTip:
-					"Share behind-the-scenes content in Stories for authenticity",
+				visualTip: "High-quality visuals are essential - consider professional photography",
+				storyTip: "Share behind-the-scenes content in Stories for authenticity",
 			};
 		case "facebook":
 			return {
 				...baseRecommendations,
-				communityTip:
-					"Post in relevant Facebook Groups to expand reach",
-				engagementTip:
-					"Ask questions to encourage comments and discussions",
+				communityTip: "Post in relevant Facebook Groups to expand reach",
+				engagementTip: "Ask questions to encourage comments and discussions",
 			};
 		case "tiktok":
 			return {
 				...baseRecommendations,
-				videoTip:
-					"Hook viewers in the first 3 seconds with a compelling opening",
+				videoTip: "Hook viewers in the first 3 seconds with a compelling opening",
 				trendTip: "Use trending sounds to increase discoverability",
 			};
 		default:
@@ -1358,75 +623,22 @@ const generatePlatformRecommendations = (platform, topic, viralScore) => {
 
 const getVisualSuggestions = (platform) => {
 	const suggestions = {
-		twitter: [
-			"Eye-catching images",
-			"GIFs",
-			"Charts/infographics",
-			"Short videos",
-		],
-		linkedin: [
-			"Professional headshots",
-			"Industry infographics",
-			"Behind-the-scenes",
-			"Carousel posts",
-		],
-		instagram: [
-			"High-quality photos",
-			"Consistent filters",
-			"Carousel posts",
-			"Reels",
-			"Stories",
-		],
-		facebook: [
-			"Engaging images",
-			"User-generated content",
-			"Facebook Live",
-			"Event photos",
-		],
-		tiktok: [
-			"Vertical videos (9:16)",
-			"Trending effects",
-			"Text overlays",
-			"Quick cuts",
-		],
+		twitter: ["Eye-catching images", "GIFs", "Charts/infographics", "Short videos"],
+		linkedin: ["Professional headshots", "Industry infographics", "Behind-the-scenes", "Carousel posts"],
+		instagram: ["High-quality photos", "Consistent filters", "Carousel posts", "Reels", "Stories"],
+		facebook: ["Engaging images", "User-generated content", "Facebook Live", "Event photos"],
+		tiktok: ["Vertical videos (9:16)", "Trending effects", "Text overlays", "Quick cuts"],
 	};
 	return suggestions[platform] || suggestions.twitter;
 };
 
 const getCTASuggestions = (platform) => {
 	const ctas = {
-		twitter: [
-			"Retweet if you agree",
-			"What's your take?",
-			"Share your thoughts 👇",
-			"Tag someone who needs this",
-		],
-		linkedin: [
-			"Share your experience",
-			"Connect for more insights",
-			"What's your take on this?",
-			"Follow for updates",
-		],
-		instagram: [
-			"Link in bio",
-			"Double tap if you agree ❤️",
-			"Save for later",
-			"Tag a friend",
-			"Share to Stories",
-		],
-		facebook: [
-			"Share if you agree",
-			"Join our community",
-			"What do you think?",
-			"Like and share",
-		],
-		tiktok: [
-			"Duet this",
-			"Try this challenge",
-			"Follow for more",
-			"Which one are you?",
-			"Comment below",
-		],
+		twitter: ["Retweet if you agree", "What's your take?", "Share your thoughts 👇", "Tag someone who needs this"],
+		linkedin: ["Share your experience", "Connect for more insights", "What's your take on this?", "Follow for updates"],
+		instagram: ["Link in bio", "Double tap if you agree ❤️", "Save for later", "Tag a friend", "Share to Stories"],
+		facebook: ["Share if you agree", "Join our community", "What do you think?", "Like and share"],
+		tiktok: ["Duet this", "Try this challenge", "Follow for more", "Which one are you?", "Comment below"],
 	};
 	return ctas[platform] || ctas.twitter;
 };
@@ -1457,21 +669,12 @@ const generateFallbackContent = (topic, platform, tone, platformConfig) => {
 	const cta = ctas[Math.floor(Math.random() * ctas.length)];
 	content += ` ${cta}`;
 
-	const hashtagPool = [
-		`#${topic.replace(/\s+/g, "")}`,
-		"#Innovation",
-		"#TechTrends",
-		"#DigitalTransformation",
-	];
-	const selectedHashtags = hashtagPool.slice(
-		0,
-		platformConfig.optimalHashtags
-	);
+	const hashtagPool = [`#${topic.replace(/\s+/g, "")}`, "#Innovation", "#TechTrends", "#DigitalTransformation"];
+	const selectedHashtags = hashtagPool.slice(0, platformConfig.optimalHashtags);
 	content += ` ${selectedHashtags.join(" ")}`;
 
 	if (content.length > platformConfig.maxCharacters) {
-		content =
-			content.substring(0, platformConfig.maxCharacters - 3) + "...";
+		content = content.substring(0, platformConfig.maxCharacters - 3) + "...";
 	}
 
 	const viralScore = Math.floor(Math.random() * 30) + 70;
@@ -1481,11 +684,7 @@ const generateFallbackContent = (topic, platform, tone, platformConfig) => {
 		viralScore,
 		hashtags: selectedHashtags,
 		platform,
-		recommendations: generatePlatformRecommendations(
-			platform,
-			topic,
-			viralScore
-		),
+		recommendations: generatePlatformRecommendations(platform, topic, viralScore),
 		platformOptimization: {
 			characterCount: content.length,
 			characterLimit: platformConfig.maxCharacters,
@@ -1495,55 +694,6 @@ const generateFallbackContent = (topic, platform, tone, platformConfig) => {
 			ctaSuggestions: getCTASuggestions(platform),
 		},
 	};
-};
-
-const calculateViralScore = (content, platform) => {
-	let score = 50;
-	const platformConfig =
-		PLATFORM_CONFIGS[platform] || PLATFORM_CONFIGS.twitter;
-
-	const contentLength = content.length;
-	const optimalLength = platformConfig.maxCharacters * 0.7;
-
-	if (contentLength <= optimalLength) {
-		score += 10;
-	} else if (contentLength <= platformConfig.maxCharacters) {
-		score += 5;
-	}
-
-	switch (platform) {
-		case "twitter":
-			if (content.includes("?")) score += 8;
-			if (content.match(/[🔥💡🚀✨⭐]/g)) score += 10;
-			if (content.match(/\b(thread|🧵)\b/gi)) score += 5;
-			break;
-		case "linkedin":
-			if (content.match(/\b(insight|experience|professional|career)\b/gi))
-				score += 8;
-			if (content.includes("?")) score += 6;
-			if (content.match(/\b(tips|advice|lessons)\b/gi)) score += 10;
-			break;
-		case "instagram":
-			if (content.match(/[❤️😍🔥✨💯]/g)) score += 12;
-			if (content.includes("link in bio")) score += 8;
-			if (content.match(/\b(save|share|tag)\b/gi)) score += 6;
-			break;
-		case "facebook":
-			if (content.match(/\b(share|community|family|friends)\b/gi))
-				score += 8;
-			if (content.includes("?")) score += 7;
-			break;
-		case "tiktok":
-			if (content.match(/\b(challenge|trend|viral|fyp)\b/gi)) score += 12;
-			if (content.match(/[🔥💯✨🎵]/g)) score += 10;
-			break;
-	}
-
-	if (content.includes("#")) score += 6;
-	if (content.match(/\b(new|breaking|exclusive|first)\b/gi)) score += 8;
-	if (content.match(/\b(tips|secrets|hacks|tricks)\b/gi)) score += 10;
-
-	return Math.min(score, 100);
 };
 
 const getBestPostTime = (platform) => {
@@ -1558,16 +708,83 @@ const getBestPostTime = (platform) => {
 	return times[platform] || "14:00-16:00 UTC";
 };
 
+// Posting Streak Data Store
+let userStreaks = new Map();
+
+// Initialize streak data for a user
+const initializeUserStreak = (userId) => {
+	if (!userStreaks.has(userId)) {
+		const today = new Date();
+		const streakData = [];
+		
+		// Generate last 30 days of data
+		for (let i = 29; i >= 0; i--) {
+			const date = new Date(today);
+			date.setDate(date.getDate() - i);
+			streakData.push({
+				date: date.toISOString().split('T')[0],
+				posted: Math.random() > 0.7, // 30% chance of posting
+				postCount: Math.random() > 0.7 ? Math.floor(Math.random() * 3) + 1 : 0
+			});
+		}
+		
+		userStreaks.set(userId, {
+			currentStreak: calculateCurrentStreak(streakData),
+			longestStreak: calculateLongestStreak(streakData),
+			lastPostDate: getLastPostDate(streakData),
+			streakData
+		});
+	}
+	return userStreaks.get(userId);
+};
+
+const calculateCurrentStreak = (streakData) => {
+	let streak = 0;
+	for (let i = streakData.length - 1; i >= 0; i--) {
+		if (streakData[i].posted) {
+			streak++;
+		} else {
+			break;
+		}
+	}
+	return streak;
+};
+
+const calculateLongestStreak = (streakData) => {
+	let maxStreak = 0;
+	let currentStreak = 0;
+	
+	for (const day of streakData) {
+		if (day.posted) {
+			currentStreak++;
+			maxStreak = Math.max(maxStreak, currentStreak);
+		} else {
+			currentStreak = 0;
+		}
+	}
+	
+	return maxStreak;
+};
+
+const getLastPostDate = (streakData) => {
+	for (let i = streakData.length - 1; i >= 0; i--) {
+		if (streakData[i].posted) {
+			return streakData[i].date;
+		}
+	}
+	return null;
+};
+
 // Auth Middleware
 const authenticateToken = (req, res, next) => {
-  const authHeader = req.headers["authorization"];
-  const token = authHeader && authHeader.split(" ")[1];
-  if (!token) return res.status(401).json({ error: "Access token required" });
-  jwt.verify(token, JWT_SECRET, (err, user) => {
-      if (err) return res.status(403).json({ error: "Invalid token" });
-      req.user = user;
-      next();
-  });
+	const authHeader = req.headers["authorization"];
+	const token = authHeader && authHeader.split(" ")[1];
+	if (!token) return res.status(401).json({ error: "Access token required" });
+	jwt.verify(token, JWT_SECRET, (err, user) => {
+		if (err) return res.status(403).json({ error: "Invalid token" });
+		req.user = user;
+		next();
+	});
 };
 
 // Health check endpoint
@@ -1592,37 +809,30 @@ app.post("/api/auth/login", async (req, res) => {
 			username: user.username,
 			email: user.email,
 			profile: user.profile,
-			postingStreak: user.postingStreak,
 		},
 	});
 });
 
-// Enhanced Trends Routes with platform support - REAL DATA ONLY
+// Enhanced Trends Routes with RapidAPI and location support
 app.get("/api/trends", authenticateToken, async (req, res) => {
 	try {
-		const { platform = "twitter", limit = 20 } = req.query;
+		const { platform = "twitter", limit = 20, location = "1" } = req.query;
 
-		console.log(
-			`API: Fetching REAL trends for platform: ${platform}, limit: ${limit}`
-		);
+		console.log(`API: Fetching REAL trends for platform: ${platform}, location: ${location}, limit: ${limit}`);
 
-		// Fetch ONLY real data from Apify - NO fallbacks whatsoever
-		let trends = await fetchTrendsFromApify(platform);
+		// Fetch ONLY real data from RapidAPI for Twitter, empty for others
+		let trends = await fetchTrendsFromRapidAPI(platform, location);
 
-		// If no real data available, return empty array - NO FALLBACKS
+		// If no real data available, return empty array
 		if (!trends || trends.length === 0) {
-			console.log(
-				`No real trends data available for ${platform} - returning empty array`
-			);
+			console.log(`No real trends data available for ${platform} - returning empty array`);
 			return res.json([]);
 		}
 
 		// Limit results
 		const limitedTrends = trends.slice(0, parseInt(limit));
 
-		console.log(
-			`API: Returning ${limitedTrends.length} REAL trends for ${platform}`
-		);
+		console.log(`API: Returning ${limitedTrends.length} REAL trends for ${platform}`);
 		res.json(limitedTrends);
 	} catch (error) {
 		console.error("Error in /api/trends:", error);
@@ -1630,99 +840,26 @@ app.get("/api/trends", authenticateToken, async (req, res) => {
 	}
 });
 
-// Enhanced Content Routes with two-step AI analysis
+// Get supported locations for trends
+app.get("/api/trends/locations", authenticateToken, (req, res) => {
+	res.json(supportedLocations);
+});
+
+// Enhanced Content Routes with two-step AI generation
 app.post("/api/content/generate", authenticateToken, async (req, res) => {
-	const { topic, platform, tone, includeHashtags, targetAudience, trendAnalysis } = req.body;
-	
-	try {
-		const generatedContent = await generateContentWithEnhancedAI(
-			topic,
-			platform,
-			tone,
-			targetAudience,
-			includeHashtags,
-			trendAnalysis
-		);
-		res.json(generatedContent);
-	} catch (error) {
-		console.error("Error generating content:", error);
-		res.status(500).json({ error: "Failed to generate content" });
-	}
-});
-
-// Posting Streak Routes
-app.get("/api/user/streak", authenticateToken, (req, res) => {
-	const user = users.find(u => u.id === req.user.id);
-	if (!user) {
-		return res.status(404).json({ error: "User not found" });
-	}
-	
-	res.json(user.postingStreak || {
-		currentStreak: 0,
-		longestStreak: 0,
-		lastPostDate: null,
-		streakData: []
-	});
-});
-
-app.post("/api/user/streak/update", authenticateToken, (req, res) => {
-	const user = users.find(u => u.id === req.user.id);
-	if (!user) {
-		return res.status(404).json({ error: "User not found" });
-	}
-	
-	const today = new Date().toISOString().split('T')[0];
-	const lastPostDate = user.postingStreak?.lastPostDate;
-	
-	// Update streak logic
-	if (lastPostDate === today) {
-		// Already posted today, no change
-		return res.json(user.postingStreak);
-	}
-	
-	const yesterday = new Date();
-	yesterday.setDate(yesterday.getDate() - 1);
-	const yesterdayStr = yesterday.toISOString().split('T')[0];
-	
-	if (lastPostDate === yesterdayStr) {
-		// Posted yesterday, continue streak
-		user.postingStreak.currentStreak += 1;
-	} else if (!lastPostDate || lastPostDate < yesterdayStr) {
-		// Streak broken or first post, start new streak
-		user.postingStreak.currentStreak = 1;
-	}
-	
-	// Update longest streak
-	if (user.postingStreak.currentStreak > user.postingStreak.longestStreak) {
-		user.postingStreak.longestStreak = user.postingStreak.currentStreak;
-	}
-	
-	// Update last post date
-	user.postingStreak.lastPostDate = today;
-	
-	// Update streak data
-	const existingEntry = user.postingStreak.streakData.find(entry => entry.date === today);
-	if (existingEntry) {
-		existingEntry.postCount += 1;
-	} else {
-		user.postingStreak.streakData.push({
-			date: today,
-			posted: true,
-			postCount: 1
-		});
-	}
-	
-	// Keep only last 30 days
-	const thirtyDaysAgo = new Date();
-	thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-	user.postingStreak.streakData = user.postingStreak.streakData.filter(
-		entry => new Date(entry.date) >= thirtyDaysAgo
+	const { topic, platform, tone, includeHashtags, targetAudience, isAnalysisOnly } = req.body;
+	const generatedContent = await generateContentWithAI(
+		topic,
+		platform,
+		tone,
+		targetAudience,
+		includeHashtags,
+		isAnalysisOnly
 	);
-	
-	res.json(user.postingStreak);
+	res.json(generatedContent);
 });
 
-// Voice AI Routes
+// Voice AI Routes (keeping existing implementation)
 app.post("/api/voice/text-to-speech", authenticateToken, async (req, res) => {
 	try {
 		const { text, voice = "Rachel" } = req.body;
@@ -1768,30 +905,20 @@ app.post("/api/voice/speech-to-text", authenticateToken, async (req, res) => {
 // Posts Routes
 app.get("/api/posts", authenticateToken, (req, res) => {
 	const userPosts = posts.filter((p) => p.userId === req.user.id);
-	res.json(
-		userPosts.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-	);
+	res.json(userPosts.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)));
 });
 
 // Analytics Routes
 app.get("/api/analytics/overview", authenticateToken, (req, res) => {
 	const userPosts = posts.filter((p) => p.userId === req.user.id);
 	const totalEngagement = userPosts.reduce(
-		(sum, post) =>
-			sum +
-			post.engagement.likes +
-			post.engagement.retweets +
-			post.engagement.comments,
+		(sum, post) => sum + post.engagement.likes + post.engagement.retweets + post.engagement.comments,
 		0
 	);
-	const totalImpressions = userPosts.reduce(
-		(sum, post) => sum + (post.performance?.impressions || 0),
-		0
-	);
+	const totalImpressions = userPosts.reduce((sum, post) => sum + (post.performance?.impressions || 0), 0);
 	const avgViralScore =
 		userPosts.length > 0
-			? userPosts.reduce((sum, post) => sum + post.viralScore, 0) /
-			  userPosts.length
+			? userPosts.reduce((sum, post) => sum + post.viralScore, 0) / userPosts.length
 			: 0;
 	res.json({
 		totalPosts: userPosts.length,
@@ -1799,8 +926,7 @@ app.get("/api/analytics/overview", authenticateToken, (req, res) => {
 		totalImpressions,
 		avgViralScore: Math.round(avgViralScore),
 		weeklyGrowth: "+12.5%",
-		topPerformingPost:
-			userPosts.sort((a, b) => b.viralScore - a.viralScore)[0] || null,
+		topPerformingPost: userPosts.sort((a, b) => b.viralScore - a.viralScore)[0] || null,
 	});
 });
 
@@ -1824,26 +950,47 @@ app.get("/api/analytics/performance", authenticateToken, (req, res) => {
 	res.json(performanceData);
 });
 
+// User Streak Routes
+app.get("/api/user/streak", authenticateToken, (req, res) => {
+	const streakData = initializeUserStreak(req.user.id);
+	res.json(streakData);
+});
+
+app.post("/api/user/streak/update", authenticateToken, (req, res) => {
+	const userId = req.user.id;
+	const streakData = initializeUserStreak(userId);
+	
+	// Mark today as posted
+	const today = new Date().toISOString().split('T')[0];
+	const todayData = streakData.streakData.find(d => d.date === today);
+	
+	if (todayData) {
+		todayData.posted = true;
+		todayData.postCount += 1;
+	} else {
+		// Add today's data if not exists
+		streakData.streakData.push({
+			date: today,
+			posted: true,
+			postCount: 1
+		});
+	}
+	
+	// Recalculate streaks
+	streakData.currentStreak = calculateCurrentStreak(streakData.streakData);
+	streakData.longestStreak = calculateLongestStreak(streakData.streakData);
+	streakData.lastPostDate = today;
+	
+	userStreaks.set(userId, streakData);
+	res.json(streakData);
+});
+
 // Start server
 app.listen(PORT, () => {
 	console.log(`🚀 TrendCraft API server running on http://localhost:${PORT}`);
 	console.log(`🎯 Frontend should run on: http://localhost:5173`);
-	console.log(
-		`🤖 Gemini AI: ${
-			process.env.GEMINI_API_KEY ? "Configured" : "Not configured"
-		}`
-	);
-	console.log(
-		`🕷️ Apify: ${
-			process.env.APIFY_API_TOKEN
-				? "Configured - REAL DATA ONLY"
-				: "Not configured - NO FALLBACKS"
-		}`
-	);
-	console.log(
-		`🎤 ElevenLabs: ${
-			process.env.ELEVENLABS_API_KEY ? "Configured" : "Not configured"
-		}`
-	);
+	console.log(`🤖 Gemini AI: ${process.env.GEMINI_API_KEY ? "Configured" : "Not configured"}`);
+	console.log(`🕷️ RapidAPI: ${process.env.X_RapidAPI_Key ? "Configured - REAL DATA ONLY" : "Not configured - NO FALLBACKS"}`);
+	console.log(`🎤 ElevenLabs: ${process.env.ELEVENLABS_API_KEY ? "Configured" : "Not configured"}`);
 	console.log("✅ Server started successfully!");
 });

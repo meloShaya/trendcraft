@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { TrendingUp, Search, Filter, Hash, Clock, Users, BarChart3, Sparkles, Zap } from 'lucide-react';
+import { TrendingUp, Search, Filter, Hash, Clock, Users, BarChart3, Sparkles, Zap, MapPin, AlertCircle } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
 interface Trend {
@@ -19,20 +19,49 @@ interface Trend {
   };
 }
 
+interface Location {
+  name: string;
+  woeid: number;
+}
+
 const Trends: React.FC = () => {
   const { token, logout } = useAuth();
   const navigate = useNavigate();
   const [trends, setTrends] = useState<Trend[]>([]);
+  const [locations, setLocations] = useState<Location[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedPlatform, setSelectedPlatform] = useState('twitter');
+  const [selectedLocation, setSelectedLocation] = useState('1'); // Worldwide by default
   const [analyzingTrend, setAnalyzingTrend] = useState<number | null>(null);
+
+  // Load supported locations
+  useEffect(() => {
+    const fetchLocations = async () => {
+      try {
+        const response = await fetch('/api/trends/locations', {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          setLocations(data);
+        }
+      } catch (error) {
+        console.error('Error fetching locations:', error);
+      }
+    };
+
+    if (token) {
+      fetchLocations();
+    }
+  }, [token]);
 
   useEffect(() => {
     const fetchTrends = async () => {
       try {
         setLoading(true);
-        const response = await fetch(`/api/trends?platform=${selectedPlatform}&limit=20`, {
+        const response = await fetch(`/api/trends?platform=${selectedPlatform}&limit=20&location=${selectedLocation}`, {
           headers: { Authorization: `Bearer ${token}` }
         });
         
@@ -68,7 +97,7 @@ const Trends: React.FC = () => {
     if (token) {
       fetchTrends();
     }
-  }, [token, selectedPlatform, logout]);
+  }, [token, selectedPlatform, selectedLocation, logout]);
 
   const filteredTrends = trends.filter(trend =>
     trend.keyword.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -76,11 +105,11 @@ const Trends: React.FC = () => {
   );
 
   const platforms = [
-    { id: 'twitter', name: 'X (Twitter)', icon: '𝕏' },
-    { id: 'instagram', name: 'Instagram', icon: '📷' },
-    { id: 'tiktok', name: 'TikTok', icon: '🎵' },
-    { id: 'facebook', name: 'Facebook', icon: 'f' },
-    { id: 'youtube', name: 'YouTube', icon: '▶️' }
+    { id: 'twitter', name: 'X (Twitter)', icon: '𝕏', supported: true },
+    { id: 'instagram', name: 'Instagram', icon: '📷', supported: false },
+    { id: 'tiktok', name: 'TikTok', icon: '🎵', supported: false },
+    { id: 'facebook', name: 'Facebook', icon: 'f', supported: false },
+    { id: 'youtube', name: 'YouTube', icon: '▶️', supported: false }
   ];
 
   const getTrendColor = (score: number) => {
@@ -151,6 +180,9 @@ const Trends: React.FC = () => {
     }
   };
 
+  const selectedLocationName = locations.find(loc => loc.woeid.toString() === selectedLocation)?.name || 'Worldwide';
+  const selectedPlatformData = platforms.find(p => p.id === selectedPlatform);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -169,9 +201,9 @@ const Trends: React.FC = () => {
         </div>
       </div>
 
-      {/* Search and Platform Filter */}
+      {/* Search and Filters */}
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-4 sm:p-6">
-        <div className="flex flex-col sm:flex-row gap-4">
+        <div className="flex flex-col lg:flex-row gap-4">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 sm:h-5 sm:w-5 text-gray-400" />
             <input
@@ -183,35 +215,94 @@ const Trends: React.FC = () => {
             />
           </div>
 
-          <div className="flex items-center space-x-2">
-            <Filter className="h-4 w-4 sm:h-5 sm:w-5 text-gray-400" />
-            <select
-              value={selectedPlatform}
-              onChange={(e) => setSelectedPlatform(e.target.value)}
-              className="px-3 sm:px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-white text-sm sm:text-base min-w-[140px]"
-            >
-              {platforms.map(platform => (
-                <option key={platform.id} value={platform.id}>
-                  {platform.icon} {platform.name}
-                </option>
-              ))}
-            </select>
+          <div className="flex flex-col sm:flex-row gap-4">
+            {/* Platform Filter */}
+            <div className="flex items-center space-x-2">
+              <Filter className="h-4 w-4 sm:h-5 sm:w-5 text-gray-400" />
+              <select
+                value={selectedPlatform}
+                onChange={(e) => setSelectedPlatform(e.target.value)}
+                className="px-3 sm:px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-white text-sm sm:text-base min-w-[140px]"
+              >
+                {platforms.map(platform => (
+                  <option key={platform.id} value={platform.id}>
+                    {platform.icon} {platform.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Location Filter */}
+            <div className="flex items-center space-x-2">
+              <MapPin className="h-4 w-4 sm:h-5 sm:w-5 text-gray-400" />
+              <select
+                value={selectedLocation}
+                onChange={(e) => setSelectedLocation(e.target.value)}
+                className="px-3 sm:px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-white text-sm sm:text-base min-w-[140px]"
+                disabled={selectedPlatform !== 'twitter'}
+              >
+                {locations.map(location => (
+                  <option key={location.woeid} value={location.woeid}>
+                    {location.name}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
         </div>
 
         {/* Platform Status Indicator */}
         <div className="mt-4 flex items-center justify-between">
           <div className="flex items-center space-x-2">
-            <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
-            <span className="text-sm text-gray-600 dark:text-gray-400">
-              Live trends from {platforms.find(p => p.id === selectedPlatform)?.name}
-            </span>
+            {selectedPlatformData?.supported ? (
+              <>
+                <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+                <span className="text-sm text-gray-600 dark:text-gray-400">
+                  Live trends from {selectedPlatformData.name} • {selectedLocationName}
+                </span>
+              </>
+            ) : (
+              <>
+                <div className="w-2 h-2 bg-orange-400 rounded-full"></div>
+                <span className="text-sm text-gray-600 dark:text-gray-400">
+                  {selectedPlatformData?.name} trends coming soon
+                </span>
+              </>
+            )}
           </div>
           <div className="text-sm text-gray-500 dark:text-gray-400">
             {trends.length} trends found
           </div>
         </div>
       </div>
+
+      {/* Platform Not Supported Message */}
+      {!selectedPlatformData?.supported && (
+        <div className="bg-gradient-to-r from-orange-50 to-yellow-50 dark:from-orange-900/20 dark:to-yellow-900/20 border border-orange-200 dark:border-orange-800 rounded-xl p-4 sm:p-6">
+          <div className="flex items-start space-x-3">
+            <div className="flex-shrink-0">
+              <AlertCircle className="h-6 w-6 text-orange-600 dark:text-orange-400" />
+            </div>
+            <div className="flex-1">
+              <h3 className="text-sm font-medium text-orange-900 dark:text-orange-200 mb-2">
+                🚧 {selectedPlatformData?.name} Trends Coming Soon!
+              </h3>
+              <p className="text-sm text-orange-700 dark:text-orange-300 mb-3">
+                We're working hard to bring you real-time trends from {selectedPlatformData?.name}. 
+                Currently, only X (Twitter) trends are available with live data from multiple locations worldwide.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <span className="px-2 py-1 bg-orange-100 dark:bg-orange-900/30 text-orange-800 dark:text-orange-200 text-xs rounded-full">
+                  🔄 In Development
+                </span>
+                <span className="px-2 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 text-xs rounded-full">
+                  ✅ X (Twitter) Available
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Enhanced AI Notice */}
       <div className="bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-4 sm:p-6">
@@ -356,7 +447,12 @@ const Trends: React.FC = () => {
             No trends found
           </h3>
           <p className="text-sm sm:text-base text-gray-500 dark:text-gray-400">
-            {searchTerm ? 'Try adjusting your search criteria.' : `No trends available for ${platforms.find(p => p.id === selectedPlatform)?.name} at the moment.`}
+            {searchTerm 
+              ? 'Try adjusting your search criteria.' 
+              : selectedPlatformData?.supported 
+                ? `No trends available for ${selectedPlatformData.name} in ${selectedLocationName} at the moment.`
+                : `${selectedPlatformData?.name} trends are coming soon! Switch to X (Twitter) for live trends.`
+            }
           </p>
         </div>
       )}
