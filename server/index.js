@@ -171,19 +171,39 @@ const fetchTrendsFromRapidAPI = async (platform = "twitter", location = "1") => 
 		console.log(`Calling RapidAPI with options:`, { ...options, headers: { ...options.headers, 'x-rapidapi-key': '[HIDDEN]' } });
 
 		const response = await axios.request(options);
-		const trendsData = response.data;
+		const apiData = response.data;
 
-		if (!trendsData || !Array.isArray(trendsData.trends)) {
-			console.log('No valid trends data received from RapidAPI:', trendsData);
+		console.log('Raw API response structure:', {
+			isArray: Array.isArray(apiData),
+			length: apiData?.length,
+			firstItemKeys: apiData?.[0] ? Object.keys(apiData[0]) : 'N/A',
+			trendsLength: apiData?.[0]?.trends?.length || 'N/A'
+		});
+
+		// Extract trends from the nested structure
+		// API returns: [{ trends: [...], as_of: "...", created_at: "...", locations: [...] }]
+		if (!Array.isArray(apiData) || apiData.length === 0) {
+			console.log('Invalid API response structure:', apiData);
 			return [];
 		}
 
-		console.log(`Retrieved ${trendsData.trends.length} raw trends from RapidAPI for ${platform}`);
+		const trendsContainer = apiData[0];
+		if (!trendsContainer || !Array.isArray(trendsContainer.trends)) {
+			console.log('No trends array found in API response:', trendsContainer);
+			return [];
+		}
+
+		const rawTrends = trendsContainer.trends;
+		console.log(`Retrieved ${rawTrends.length} raw trends from RapidAPI for ${platform}`);
+		console.log('Sample trend data:', rawTrends.slice(0, 3));
 
 		// Transform RapidAPI data to our format
-		const transformedTrends = trendsData.trends.map((trend, index) => {
+		const transformedTrends = rawTrends.map((trend, index) => {
 			const keyword = trend.name || trend.query || 'Unknown';
-			const volume = trend.tweet_volume || Math.floor(Math.random() * 50000) + 1000;
+			// Use actual tweet_volume from API, fallback to 0 if null
+			const volume = trend.tweet_volume || 0;
+			
+			console.log(`Processing trend ${index + 1}: "${keyword}" with volume: ${volume}`);
 			
 			return {
 				id: index + 1,
@@ -202,8 +222,13 @@ const fetchTrendsFromRapidAPI = async (platform = "twitter", location = "1") => 
 			};
 		});
 
-		console.log(`Successfully transformed ${transformedTrends.length} REAL trends for ${platform}`);
-		return transformedTrends;
+		// Filter out trends with "Unknown" keywords
+		const validTrends = transformedTrends.filter(trend => 
+			trend.keyword && trend.keyword !== 'Unknown' && trend.keyword.length > 0
+		);
+
+		console.log(`Successfully transformed ${validTrends.length} valid trends for ${platform}`);
+		return validTrends;
 
 	} catch (error) {
 		console.error(`Error fetching trends from RapidAPI:`, {
@@ -218,24 +243,35 @@ const fetchTrendsFromRapidAPI = async (platform = "twitter", location = "1") => 
 
 // Helper functions for data processing
 const cleanKeyword = (keyword) => {
-	if (!keyword || typeof keyword !== "string") return "Unknown";
-	const cleaned = keyword.replace(/[#@]/g, "").substring(0, 100).trim();
-	return cleaned.length > 0 ? cleaned : "Unknown";
+	if (!keyword || typeof keyword !== "string") return null;
+	
+	// Remove URL encoding and clean up the keyword
+	let cleaned = decodeURIComponent(keyword);
+	
+	// Remove hashtags and @ symbols for cleaner display
+	cleaned = cleaned.replace(/^[#@]+/, "");
+	
+	// Limit length and trim
+	cleaned = cleaned.substring(0, 100).trim();
+	
+	return cleaned.length > 0 ? cleaned : null;
 };
 
 const categorizeKeyword = (keyword) => {
 	const lowerKeyword = keyword.toLowerCase();
 	
-	if (lowerKeyword.includes('tech') || lowerKeyword.includes('ai') || lowerKeyword.includes('crypto')) {
+	if (lowerKeyword.includes('tech') || lowerKeyword.includes('ai') || lowerKeyword.includes('crypto') || lowerKeyword.includes('cyber')) {
 		return 'Technology';
-	} else if (lowerKeyword.includes('sport') || lowerKeyword.includes('game') || lowerKeyword.includes('football')) {
+	} else if (lowerKeyword.includes('sport') || lowerKeyword.includes('game') || lowerKeyword.includes('football') || lowerKeyword.includes('olympic')) {
 		return 'Sports';
-	} else if (lowerKeyword.includes('music') || lowerKeyword.includes('movie') || lowerKeyword.includes('celebrity')) {
+	} else if (lowerKeyword.includes('music') || lowerKeyword.includes('movie') || lowerKeyword.includes('celebrity') || lowerKeyword.includes('birthday')) {
 		return 'Entertainment';
 	} else if (lowerKeyword.includes('politic') || lowerKeyword.includes('election') || lowerKeyword.includes('government')) {
 		return 'Politics';
 	} else if (lowerKeyword.includes('business') || lowerKeyword.includes('market') || lowerKeyword.includes('economy')) {
 		return 'Business';
+	} else if (lowerKeyword.includes('news') || lowerKeyword.includes('breaking')) {
+		return 'News';
 	}
 	
 	return 'General';
@@ -249,6 +285,7 @@ const generateInterestsFromKeyword = (keyword) => {
 		'Entertainment': ['movies', 'music', 'celebrities'],
 		'Politics': ['current events', 'governance', 'policy'],
 		'Business': ['entrepreneurship', 'finance', 'marketing'],
+		'News': ['current events', 'breaking news', 'journalism'],
 		'General': ['trending topics', 'social media', 'culture']
 	};
 	
@@ -257,16 +294,23 @@ const generateInterestsFromKeyword = (keyword) => {
 
 const extractHashtagsFromText = (text) => {
 	if (!text || typeof text !== "string") return [];
+	
+	// First, try to find existing hashtags
 	const hashtagRegex = /#[\w]+/g;
 	const matches = text.match(hashtagRegex) || [];
 	
-	// If no hashtags found, generate some based on the text
-	if (matches.length === 0) {
-		const words = text.split(' ').filter(word => word.length > 3);
-		return words.slice(0, 3).map(word => `#${word.replace(/[^a-zA-Z0-9]/g, '')}`);
+	// If hashtags found, return them
+	if (matches.length > 0) {
+		return matches.slice(0, 5);
 	}
 	
-	return matches.slice(0, 5);
+	// If no hashtags found, generate some based on the text
+	const words = text.split(' ')
+		.filter(word => word.length > 3)
+		.filter(word => !word.includes('http'))
+		.filter(word => !/^\d+$/.test(word)); // Remove pure numbers
+	
+	return words.slice(0, 3).map(word => `#${word.replace(/[^a-zA-Z0-9]/g, '')}`);
 };
 
 const calculateGrowthFromVolume = (volume) => {
@@ -289,6 +333,7 @@ const calculateTrendScore = (volume, platform) => {
 			else if (volume > 50000) score = 85;
 			else if (volume > 10000) score = 75;
 			else if (volume > 1000) score = 65;
+			else if (volume > 0) score = 55;
 			break;
 		default:
 			score = Math.min(50 + volume / 1000, 95);
