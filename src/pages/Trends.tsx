@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { TrendingUp, Search, Filter, Hash, Clock, Users, BarChart3 } from 'lucide-react';
+import { TrendingUp, Search, Filter, Hash, Clock, Users, BarChart3, Sparkles, Zap } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
 interface Trend {
@@ -26,6 +26,7 @@ const Trends: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedPlatform, setSelectedPlatform] = useState('twitter');
+  const [analyzingTrend, setAnalyzingTrend] = useState<number | null>(null);
 
   useEffect(() => {
     const fetchTrends = async () => {
@@ -89,21 +90,65 @@ const Trends: React.FC = () => {
     return 'text-green-600 bg-green-100 dark:bg-green-900/20 dark:text-green-400';
   };
 
-  const handleUseInContent = (trend: Trend) => {
-    // Store the trend data in sessionStorage so it can be accessed by the content generator
-    const trendData = {
-      topic: trend.keyword,
-      category: trend.category,
-      hashtags: trend.relatedHashtags,
-      demographics: trend.demographics,
-      peakTime: trend.peakTime,
-      trendScore: trend.trendScore
-    };
+  const handleUseInContent = async (trend: Trend) => {
+    setAnalyzingTrend(trend.id);
     
-    sessionStorage.setItem('selectedTrend', JSON.stringify(trendData));
-    
-    // Navigate to the content generator
-    navigate('/generate');
+    try {
+      // Step 1: Analyze the trend first
+      const analysisResponse = await fetch('/api/content/generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          topic: trend.keyword,
+          platform: selectedPlatform,
+          tone: 'professional',
+          includeHashtags: true,
+          targetAudience: trend.demographics.interests.join(', ') || '',
+          isAnalysisOnly: true // Flag to indicate we want analysis first
+        })
+      });
+
+      if (!analysisResponse.ok) {
+        throw new Error('Failed to analyze trend');
+      }
+
+      // Store the trend data with analysis in sessionStorage
+      const trendData = {
+        topic: trend.keyword,
+        category: trend.category,
+        hashtags: trend.relatedHashtags,
+        demographics: trend.demographics,
+        peakTime: trend.peakTime,
+        trendScore: trend.trendScore,
+        platform: selectedPlatform,
+        volume: trend.volume,
+        growth: trend.growth
+      };
+      
+      sessionStorage.setItem('selectedTrend', JSON.stringify(trendData));
+      
+      // Navigate to the content generator
+      navigate('/generate');
+    } catch (error) {
+      console.error('Error analyzing trend:', error);
+      // Fallback: navigate without analysis
+      const trendData = {
+        topic: trend.keyword,
+        category: trend.category,
+        hashtags: trend.relatedHashtags,
+        demographics: trend.demographics,
+        peakTime: trend.peakTime,
+        trendScore: trend.trendScore
+      };
+      
+      sessionStorage.setItem('selectedTrend', JSON.stringify(trendData));
+      navigate('/generate');
+    } finally {
+      setAnalyzingTrend(null);
+    }
   };
 
   if (loading) {
@@ -168,10 +213,39 @@ const Trends: React.FC = () => {
         </div>
       </div>
 
+      {/* Enhanced AI Notice */}
+      <div className="bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-4 sm:p-6">
+        <div className="flex items-start space-x-3">
+          <div className="flex-shrink-0">
+            <Sparkles className="h-6 w-6 text-blue-600 dark:text-blue-400" />
+          </div>
+          <div className="flex-1">
+            <h3 className="text-sm font-medium text-blue-900 dark:text-blue-200 mb-2">
+              🚀 Enhanced AI Content Generation
+            </h3>
+            <p className="text-sm text-blue-700 dark:text-blue-300 mb-3">
+              Our AI now uses a sophisticated two-step process: first analyzing the trend's core emotion and talking points, 
+              then generating viral content with proven hooks and psychological triggers.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <span className="px-2 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 text-xs rounded-full">
+                ✨ Viral Content Hooks
+              </span>
+              <span className="px-2 py-1 bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-200 text-xs rounded-full">
+                🧠 Trend Analysis
+              </span>
+              <span className="px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200 text-xs rounded-full">
+                🎯 Platform Optimization
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Trends Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
         {filteredTrends.map((trend) => (
-          <div key={trend.id} className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-4 sm:p-6 hover:shadow-md transition-shadow">
+          <div key={trend.id} className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-4 sm:p-6 hover:shadow-md transition-all duration-300 hover:border-blue-300 dark:hover:border-blue-600">
             <div className="flex items-start justify-between mb-4">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center space-x-2 sm:space-x-3 mb-2">
@@ -245,18 +319,29 @@ const Trends: React.FC = () => {
               </div>
             </div>
 
-            {/* Demographics and Action */}
+            {/* Demographics and Enhanced Action */}
             <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
-              <div className="flex items-center justify-between text-sm">
+              <div className="flex items-center justify-between">
                 <div className="flex items-center text-gray-600 dark:text-gray-400">
                   <Users className="h-3 w-3 sm:h-4 sm:w-4 mr-2" />
                   <span className="text-xs sm:text-sm">Age: {trend.demographics.age}</span>
                 </div>
                 <button 
                   onClick={() => handleUseInContent(trend)}
-                  className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-medium text-xs sm:text-sm transition-colors hover:bg-blue-50 dark:hover:bg-blue-900/20 px-2 py-1 rounded"
+                  disabled={analyzingTrend === trend.id}
+                  className="flex items-center space-x-2 px-3 py-2 bg-gradient-to-r from-blue-600 to-purple-600 text-white text-xs sm:text-sm font-medium rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
                 >
-                  Use in Content
+                  {analyzingTrend === trend.id ? (
+                    <>
+                      <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white"></div>
+                      <span>Analyzing...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Zap className="h-3 w-3 sm:h-4 sm:w-4" />
+                      <span>Create Viral Content</span>
+                    </>
+                  )}
                 </button>
               </div>
             </div>

@@ -453,8 +453,37 @@ let users = [
 			avatar: "https://images.pexels.com/photos/614810/pexels-photo-614810.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&fit=crop",
 		},
 		createdAt: new Date("2024-01-01"),
+		postingStreak: {
+			currentStreak: 7,
+			longestStreak: 12,
+			lastPostDate: new Date().toISOString().split('T')[0],
+			streakData: generateStreakData()
+		}
 	},
 ];
+
+// Generate streak data for the last 30 days
+function generateStreakData() {
+	const data = [];
+	const today = new Date();
+	
+	for (let i = 29; i >= 0; i--) {
+		const date = new Date(today);
+		date.setDate(date.getDate() - i);
+		const dateStr = date.toISOString().split('T')[0];
+		
+		// Simulate posting pattern - more posts in recent days
+		const posted = i < 7 ? true : Math.random() > 0.6;
+		
+		data.push({
+			date: dateStr,
+			posted: posted,
+			postCount: posted ? Math.floor(Math.random() * 3) + 1 : 0
+		});
+	}
+	
+	return data;
+}
 
 let posts = [
 	{
@@ -994,118 +1023,136 @@ const PLATFORM_CONFIGS = {
 	},
 };
 
-// ROBUST SYSTEM PROMPT
-const createRobustSystemPrompt = (
+// Enhanced Content Hooks for Viral Content
+const VIRAL_CONTENT_HOOKS = {
+	bold_claims: [
+		"This will change everything you know about",
+		"Nobody talks about this, but",
+		"The truth about {topic} that experts don't want you to know",
+		"Why everyone is wrong about",
+		"The {topic} secret that changed my life"
+	],
+	surprising_statistics: [
+		"Did you know that 90% of people don't know",
+		"Here's a shocking fact about {topic}:",
+		"The numbers behind {topic} will blow your mind",
+		"Research shows something surprising about"
+	],
+	relatable_problems: [
+		"We've all been there:",
+		"If you've ever struggled with {topic}, this is for you",
+		"The {topic} problem everyone faces but nobody talks about",
+		"Why {topic} feels impossible (and how to fix it)"
+	],
+	curiosity_gaps: [
+		"The one thing about {topic} that changed everything",
+		"What I wish I knew about {topic} before starting",
+		"The {topic} mistake that's costing you",
+		"Why {topic} isn't working for you (and what to do instead)"
+	],
+	controversy: [
+		"Unpopular opinion:",
+		"Hot take:",
+		"This might be controversial, but",
+		"I'm about to say something that will upset people:"
+	]
+};
+
+// Two-Step AI Content Generation Process
+const generateContentWithEnhancedAI = async (
 	topic,
 	platform,
 	tone,
 	targetAudience,
-	includeHashtags
+	includeHashtags,
+	trendAnalysis = null
 ) => {
-	const platformConfig =
-		PLATFORM_CONFIGS[platform] || PLATFORM_CONFIGS.twitter;
+	try {
+		const platformConfig = PLATFORM_CONFIGS[platform] || PLATFORM_CONFIGS.twitter;
+		
+		let analysisResult = trendAnalysis;
+		
+		// Step 1: Trend Analysis (if not provided)
+		if (!analysisResult) {
+			console.log("Step 1: Analyzing trend context...");
+			const analysisPrompt = `Analyze the social media trend "${topic}". What is the core emotion, the key talking points, and the general sentiment? Provide a brief, one-sentence analysis focusing on what makes this topic engaging and viral-worthy.`;
+			
+			const analysis = await model.generateContent(analysisPrompt);
+			analysisResult = analysis.response.text().trim();
+			console.log("Trend Analysis:", analysisResult);
+		}
+		
+		// Step 2: Enhanced Content Generation with Viral Hooks
+		console.log("Step 2: Generating viral content...");
+		
+		// Select random viral hooks
+		const hookTypes = Object.keys(VIRAL_CONTENT_HOOKS);
+		const selectedHookType = hookTypes[Math.floor(Math.random() * hookTypes.length)];
+		const hooks = VIRAL_CONTENT_HOOKS[selectedHookType];
+		const selectedHook = hooks[Math.floor(Math.random() * hooks.length)];
+		
+		const enhancedPrompt = `You are TrendCraft AI, the world's most advanced viral content generator. Your ONLY job is to create ONE piece of ready-to-publish content for ${platform}.
 
-	return `You are TrendCraft AI, an expert social media content generator. Your ONLY job is to generate ONE piece of ready-to-publish content for ${platform}.
+TREND ANALYSIS CONTEXT: ${analysisResult}
+
+VIRAL CONTENT STRATEGY:
+- Use this proven hook technique: "${selectedHook.replace('{topic}', topic)}"
+- Apply the core emotion and sentiment from the trend analysis
+- Create content that taps into the current conversation momentum
 
 CRITICAL RULES - FOLLOW EXACTLY:
 1. Generate ONLY the final content text - no explanations, no options, no meta-commentary
-2. Do NOT include phrases like "Here's a post", "Option 1", "Tweet 1", "**Option**", or any similar introductory text
-3. Do NOT provide multiple versions or choices - generate exactly ONE piece of content
+2. Do NOT include phrases like "Here's a post", "Option 1", "Tweet 1", or any introductory text
+3. Do NOT provide multiple versions - generate exactly ONE piece of content
 4. Do NOT explain what you're doing or why
-5. The response should be ONLY the content that can be directly posted to ${platform}
-6. Maximum ${
-		platformConfig.maxCharacters
-	} characters - strictly enforce this limit
-7. Use ${tone} tone throughout
-8. Target audience: ${targetAudience || "general audience"}
-9. ${
-		includeHashtags
-			? `Include ${platformConfig.optimalHashtags} relevant hashtags`
-			: "Do not include hashtags"
-	}
+5. Maximum ${platformConfig.maxCharacters} characters - strictly enforce this limit
+6. Use ${tone} tone throughout
+7. Target audience: ${targetAudience || "general audience"}
+8. ${includeHashtags ? `Include ${platformConfig.optimalHashtags} relevant hashtags` : "Do not include hashtags"}
 
-PLATFORM-SPECIFIC REQUIREMENTS FOR ${platform.toUpperCase()}:
-${
-	platform === "twitter"
-		? `
-- Keep under 280 characters
-- Be punchy and engaging
-- Include 1-2 hashtags maximum if requested
-- Use engaging questions or calls for interaction
-- Consider emojis sparingly but effectively`
-		: ""
-}
+PLATFORM-SPECIFIC VIRAL OPTIMIZATION FOR ${platform.toUpperCase()}:
+${platform === "twitter" ? `
+- Hook readers in the first 10 words
+- Use power words that drive engagement
+- Include a clear call-to-action
+- Consider thread potential for complex topics` : ""}
 
-${
-	platform === "linkedin"
-		? `
-- Professional tone with personal insights
-- Can be longer form (up to 3000 characters)
-- Include 3-5 industry hashtags if requested
-- Focus on value and professional growth
-- Include professional experiences or lessons`
-		: ""
-}
+${platform === "linkedin" ? `
+- Start with a professional insight or lesson learned
+- Include personal experience or case study
+- Use industry-relevant language
+- End with a thought-provoking question` : ""}
 
-${
-	platform === "instagram"
-		? `
-- Visual-first approach
-- Use 8-15 hashtags if requested
-- Include emojis and line breaks for readability
-- Focus on lifestyle and visual appeal
-- Include "link in bio" style CTAs`
-		: ""
-}
+${platform === "instagram" ? `
+- Create visual storytelling through words
+- Use emojis strategically for visual breaks
+- Include lifestyle and aspirational elements
+- Focus on community and connection` : ""}
 
-${
-	platform === "facebook"
-		? `
-- Community-focused content
-- Can be longer form
-- Use 1-3 hashtags if requested
-- Focus on shareable, valuable content
-- Encourage community interaction`
-		: ""
-}
+${platform === "facebook" ? `
+- Create shareable, discussion-worthy content
+- Focus on community values and shared experiences
+- Use conversational, friendly tone
+- Encourage comments and shares` : ""}
 
-${
-	platform === "tiktok"
-		? `
-- Video-first content description
-- Use 3-7 hashtags including trending ones if requested
-- Focus on entertainment and trends
-- Include challenge or duet CTAs
-- Keep descriptions engaging and fun`
-		: ""
-}
+${platform === "tiktok" ? `
+- Create content that begs for video format
+- Use trending language and phrases
+- Include challenge or duet potential
+- Focus on entertainment and relatability` : ""}
+
+VIRAL AMPLIFICATION TECHNIQUES:
+- Use psychological triggers (curiosity, FOMO, social proof)
+- Include contrarian or surprising angles
+- Create content that people MUST share
+- Tap into current cultural moments and emotions
 
 TOPIC: ${topic}
+TREND CONTEXT: ${analysisResult}
 
-Generate the content now - ONLY the content, nothing else:`;
-};
+Generate the viral content now - ONLY the content, nothing else:`;
 
-// Enhanced helper function to generate content with platform optimization
-const generateContentWithAI = async (
-	topic,
-	platform,
-	tone,
-	targetAudience,
-	includeHashtags
-) => {
-	try {
-		const platformConfig =
-			PLATFORM_CONFIGS[platform] || PLATFORM_CONFIGS.twitter;
-
-		const prompt = createRobustSystemPrompt(
-			topic,
-			platform,
-			tone,
-			targetAudience,
-			includeHashtags
-		);
-
-		const result = await model.generateContent(prompt);
+		const result = await model.generateContent(enhancedPrompt);
 		const response = await result.response;
 		let content = response.text().trim();
 
@@ -1121,19 +1168,15 @@ const generateContentWithAI = async (
 
 		// Ensure content doesn't exceed platform limits
 		if (content.length > platformConfig.maxCharacters) {
-			content =
-				content.substring(0, platformConfig.maxCharacters - 3) + "...";
+			content = content.substring(0, platformConfig.maxCharacters - 3) + "...";
 		}
 
-		const viralScore = calculateViralScore(content, platform);
+		// Enhanced viral score calculation
+		const viralScore = calculateEnhancedViralScore(content, platform, analysisResult);
 		const hashtagRegex = /#[\w]+/g;
 		const hashtags = content.match(hashtagRegex) || [];
 
-		const recommendations = generatePlatformRecommendations(
-			platform,
-			topic,
-			viralScore
-		);
+		const recommendations = generatePlatformRecommendations(platform, topic, viralScore);
 
 		return {
 			content,
@@ -1141,6 +1184,8 @@ const generateContentWithAI = async (
 			hashtags,
 			platform,
 			recommendations,
+			trendAnalysis: analysisResult,
+			viralHook: selectedHook.replace('{topic}', topic),
 			platformOptimization: {
 				characterCount: content.length,
 				characterLimit: platformConfig.maxCharacters,
@@ -1151,19 +1196,107 @@ const generateContentWithAI = async (
 			},
 		};
 	} catch (error) {
-		console.error("Error generating content with Gemini AI:", error);
+		console.error("Error generating enhanced content with Gemini AI:", error);
 
-		const platformConfig =
-			PLATFORM_CONFIGS[platform] || PLATFORM_CONFIGS.twitter;
-		const fallbackContent = generateFallbackContent(
-			topic,
-			platform,
-			tone,
-			platformConfig
-		);
+		const platformConfig = PLATFORM_CONFIGS[platform] || PLATFORM_CONFIGS.twitter;
+		const fallbackContent = generateFallbackContent(topic, platform, tone, platformConfig);
 
 		return fallbackContent;
 	}
+};
+
+// Enhanced viral score calculation
+const calculateEnhancedViralScore = (content, platform, trendAnalysis) => {
+	let score = 50;
+	const platformConfig = PLATFORM_CONFIGS[platform] || PLATFORM_CONFIGS.twitter;
+
+	// Base scoring from original function
+	const contentLength = content.length;
+	const optimalLength = platformConfig.maxCharacters * 0.7;
+
+	if (contentLength <= optimalLength) {
+		score += 10;
+	} else if (contentLength <= platformConfig.maxCharacters) {
+		score += 5;
+	}
+
+	// Enhanced viral indicators
+	const viralWords = [
+		'secret', 'truth', 'shocking', 'nobody', 'everyone', 'mistake', 'wrong',
+		'change', 'transform', 'breakthrough', 'discover', 'reveal', 'expose',
+		'ultimate', 'proven', 'guaranteed', 'instant', 'immediately'
+	];
+	
+	const emotionalWords = [
+		'amazing', 'incredible', 'unbelievable', 'mind-blowing', 'game-changer',
+		'revolutionary', 'powerful', 'essential', 'crucial', 'vital'
+	];
+	
+	const urgencyWords = [
+		'now', 'today', 'immediately', 'urgent', 'limited', 'exclusive',
+		'before', 'deadline', 'ending', 'last chance'
+	];
+
+	// Check for viral indicators
+	viralWords.forEach(word => {
+		if (content.toLowerCase().includes(word)) score += 3;
+	});
+	
+	emotionalWords.forEach(word => {
+		if (content.toLowerCase().includes(word)) score += 2;
+	});
+	
+	urgencyWords.forEach(word => {
+		if (content.toLowerCase().includes(word)) score += 2;
+	});
+
+	// Platform-specific enhancements
+	switch (platform) {
+		case "twitter":
+			if (content.includes("?")) score += 8;
+			if (content.match(/[🔥💡🚀✨⭐]/g)) score += 10;
+			if (content.match(/\b(thread|🧵)\b/gi)) score += 5;
+			if (content.length <= 240) score += 5; // Optimal Twitter length
+			break;
+		case "linkedin":
+			if (content.match(/\b(insight|experience|professional|career|lesson)\b/gi)) score += 8;
+			if (content.includes("?")) score += 6;
+			if (content.match(/\b(tips|advice|strategy|growth)\b/gi)) score += 10;
+			break;
+		case "instagram":
+			if (content.match(/[❤️😍🔥✨💯]/g)) score += 12;
+			if (content.includes("link in bio")) score += 8;
+			if (content.match(/\b(save|share|tag)\b/gi)) score += 6;
+			break;
+		case "facebook":
+			if (content.match(/\b(share|community|family|friends)\b/gi)) score += 8;
+			if (content.includes("?")) score += 7;
+			break;
+		case "tiktok":
+			if (content.match(/\b(challenge|trend|viral|fyp)\b/gi)) score += 12;
+			if (content.match(/[🔥💯✨🎵]/g)) score += 10;
+			break;
+	}
+
+	// Trend analysis bonus
+	if (trendAnalysis) {
+		if (trendAnalysis.toLowerCase().includes('viral') || 
+			trendAnalysis.toLowerCase().includes('trending')) {
+			score += 15;
+		}
+		if (trendAnalysis.toLowerCase().includes('excited') || 
+			trendAnalysis.toLowerCase().includes('popular')) {
+			score += 10;
+		}
+	}
+
+	// Content structure bonuses
+	if (content.includes("#")) score += 6;
+	if (content.match(/\b(new|breaking|exclusive|first)\b/gi)) score += 8;
+	if (content.match(/\b(tips|secrets|hacks|tricks)\b/gi)) score += 10;
+	if (content.startsWith('"') || content.includes('"')) score += 5; // Quotes are shareable
+
+	return Math.min(score, 100);
 };
 
 // Helper function to generate platform-specific recommendations
@@ -1459,6 +1592,7 @@ app.post("/api/auth/login", async (req, res) => {
 			username: user.username,
 			email: user.email,
 			profile: user.profile,
+			postingStreak: user.postingStreak,
 		},
 	});
 });
@@ -1496,17 +1630,96 @@ app.get("/api/trends", authenticateToken, async (req, res) => {
 	}
 });
 
-// Enhanced Content Routes with platform optimization
+// Enhanced Content Routes with two-step AI analysis
 app.post("/api/content/generate", authenticateToken, async (req, res) => {
-	const { topic, platform, tone, includeHashtags, targetAudience } = req.body;
-	const generatedContent = await generateContentWithAI(
-		topic,
-		platform,
-		tone,
-		targetAudience,
-		includeHashtags
+	const { topic, platform, tone, includeHashtags, targetAudience, trendAnalysis } = req.body;
+	
+	try {
+		const generatedContent = await generateContentWithEnhancedAI(
+			topic,
+			platform,
+			tone,
+			targetAudience,
+			includeHashtags,
+			trendAnalysis
+		);
+		res.json(generatedContent);
+	} catch (error) {
+		console.error("Error generating content:", error);
+		res.status(500).json({ error: "Failed to generate content" });
+	}
+});
+
+// Posting Streak Routes
+app.get("/api/user/streak", authenticateToken, (req, res) => {
+	const user = users.find(u => u.id === req.user.id);
+	if (!user) {
+		return res.status(404).json({ error: "User not found" });
+	}
+	
+	res.json(user.postingStreak || {
+		currentStreak: 0,
+		longestStreak: 0,
+		lastPostDate: null,
+		streakData: []
+	});
+});
+
+app.post("/api/user/streak/update", authenticateToken, (req, res) => {
+	const user = users.find(u => u.id === req.user.id);
+	if (!user) {
+		return res.status(404).json({ error: "User not found" });
+	}
+	
+	const today = new Date().toISOString().split('T')[0];
+	const lastPostDate = user.postingStreak?.lastPostDate;
+	
+	// Update streak logic
+	if (lastPostDate === today) {
+		// Already posted today, no change
+		return res.json(user.postingStreak);
+	}
+	
+	const yesterday = new Date();
+	yesterday.setDate(yesterday.getDate() - 1);
+	const yesterdayStr = yesterday.toISOString().split('T')[0];
+	
+	if (lastPostDate === yesterdayStr) {
+		// Posted yesterday, continue streak
+		user.postingStreak.currentStreak += 1;
+	} else if (!lastPostDate || lastPostDate < yesterdayStr) {
+		// Streak broken or first post, start new streak
+		user.postingStreak.currentStreak = 1;
+	}
+	
+	// Update longest streak
+	if (user.postingStreak.currentStreak > user.postingStreak.longestStreak) {
+		user.postingStreak.longestStreak = user.postingStreak.currentStreak;
+	}
+	
+	// Update last post date
+	user.postingStreak.lastPostDate = today;
+	
+	// Update streak data
+	const existingEntry = user.postingStreak.streakData.find(entry => entry.date === today);
+	if (existingEntry) {
+		existingEntry.postCount += 1;
+	} else {
+		user.postingStreak.streakData.push({
+			date: today,
+			posted: true,
+			postCount: 1
+		});
+	}
+	
+	// Keep only last 30 days
+	const thirtyDaysAgo = new Date();
+	thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+	user.postingStreak.streakData = user.postingStreak.streakData.filter(
+		entry => new Date(entry.date) >= thirtyDaysAgo
 	);
-	res.json(generatedContent);
+	
+	res.json(user.postingStreak);
 });
 
 // Voice AI Routes

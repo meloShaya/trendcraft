@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { useAuth } from '../contexts/AuthContext';
+import PostingStreak from '../components/PostingStreak';
 
 interface AnalyticsData {
   totalPosts: number;
@@ -144,10 +145,10 @@ const Dashboard: React.FC = () => {
         ))}
       </div>
 
-      {/* Charts and Recent Activity */}
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 sm:gap-6">
+      {/* Main Content Grid */}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 sm:gap-6">
         {/* Performance Chart */}
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-4 sm:p-6">
+        <div className="xl:col-span-2 bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-4 sm:p-6">
           <h3 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-white mb-4">
             Performance Trends
           </h3>
@@ -231,6 +232,9 @@ const Dashboard: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Posting Streak Component */}
+      <PostingStreak />
 
       {/* Quick Actions */}
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-4 sm:p-6">
