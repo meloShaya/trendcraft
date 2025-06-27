@@ -1,24 +1,31 @@
 /*
-  # TrendCraft Database Schema
-  
-  This schema defines all tables needed for the TrendCraft social media content generation platform.
-  
-  ## Tables Overview:
-  1. **users** - Core user accounts with profile information
-  2. **user_social_accounts** - Connected social media accounts for each user
-  3. **user_auth_providers** - Social authentication providers (Google, GitHub, etc.)
-  4. **trends** - Cached trending topics from various platforms
-  5. **trend_contexts** - Firecrawl search context data for trends
-  6. **posts** - User-generated content posts
-  7. **post_analytics** - Performance metrics for published posts
-  8. **user_streaks** - Daily posting streak data
-  9. **user_settings** - User preferences and notification settings
-  10. **api_usage_logs** - Track API usage for rate limiting
-  
-  ## Security:
-  - Row Level Security (RLS) enabled on all tables
-  - Policies for authenticated users to access their own data
-  - Admin policies for system operations
+  # Complete TrendCraft Database Schema (Fixed)
+
+  This schema has been corrected to resolve the "generation expression is not immutable" error.
+  The fix involves explicitly setting the timezone to 'UTC' when generating the `collection_date`
+  column in the `post_analytics` table.
+
+  1. New Tables
+     - `users` - Core user accounts with profile information
+     - `user_social_accounts` - Connected social media accounts for publishing
+     - `user_auth_providers` - Social authentication providers used by users
+     - `trends` - Cached trending topics from various platforms
+     - `trend_contexts` - Firecrawl search context data for trends
+     - `posts` - User-generated content posts
+     - `post_analytics` - Performance metrics for published posts
+     - `user_streaks` - Daily posting streak tracking
+     - `user_settings` - User preferences and notification settings
+     - `api_usage_logs` - API usage tracking for rate limiting and billing
+
+  2. Security
+     - Enable RLS on all tables
+     - Add policies for user data access
+     - Service role policies for system operations
+
+  3. Performance
+     - Strategic indexes for common queries
+     - Automatic cleanup functions for expired data
+     - Analytics views for dashboard insights
 */
 
 -- Enable necessary extensions
@@ -258,10 +265,14 @@ CREATE TABLE IF NOT EXISTS post_analytics (
   
   -- Data collection timestamp
   collected_at timestamptz DEFAULT now(),
-  created_at timestamptz DEFAULT now(),
-  
-  UNIQUE(post_id, platform, collected_at::date)
+  -- CORRECTED: Explicitly cast to date at a fixed timezone ('utc') to ensure immutability.
+  collection_date date GENERATED ALWAYS AS (CAST(timezone('utc', collected_at) AS date)) STORED,
+  created_at timestamptz DEFAULT now()
 );
+
+-- Add unique constraint using the generated column
+ALTER TABLE post_analytics ADD CONSTRAINT unique_post_analytics_daily  
+  UNIQUE(post_id, platform, collection_date);
 
 -- Enable RLS
 ALTER TABLE post_analytics ENABLE ROW LEVEL SECURITY;
@@ -285,6 +296,7 @@ CREATE POLICY "Service role can manage analytics" ON post_analytics
 -- Index for efficient querying
 CREATE INDEX IF NOT EXISTS idx_post_analytics_post_id ON post_analytics(post_id);
 CREATE INDEX IF NOT EXISTS idx_post_analytics_collected_at ON post_analytics(collected_at);
+CREATE INDEX IF NOT EXISTS idx_post_analytics_collection_date ON post_analytics(collection_date);
 
 -- =============================================
 -- USER STREAKS TABLE
@@ -415,7 +427,7 @@ CREATE TRIGGER update_posts_updated_at BEFORE UPDATE ON posts
 CREATE TRIGGER update_user_settings_updated_at BEFORE UPDATE ON user_settings
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
--- Function to clean up expired trends and contexts
+-- Function to clean up expired data
 CREATE OR REPLACE FUNCTION cleanup_expired_data()
 RETURNS void AS $$
 BEGIN
@@ -429,13 +441,6 @@ BEGIN
   DELETE FROM api_usage_logs WHERE date < CURRENT_DATE - INTERVAL '90 days';
 END;
 $$ LANGUAGE plpgsql;
-
--- =============================================
--- INITIAL DATA
--- =============================================
-
--- Insert default user settings for existing users (if any)
--- This will be handled by the application when users sign up
 
 -- =============================================
 -- VIEWS FOR ANALYTICS
@@ -471,18 +476,3 @@ FROM trends
 WHERE expires_at > now()
 GROUP BY platform, location_name
 ORDER BY platform, location_name;
-
--- =============================================
--- COMMENTS
--- =============================================
-
-COMMENT ON TABLE users IS 'Core user accounts with profile information';
-COMMENT ON TABLE user_social_accounts IS 'Connected social media accounts for publishing';
-COMMENT ON TABLE user_auth_providers IS 'Social authentication providers used by users';
-COMMENT ON TABLE trends IS 'Cached trending topics from various platforms';
-COMMENT ON TABLE trend_contexts IS 'Firecrawl search context data for trends';
-COMMENT ON TABLE posts IS 'User-generated content posts';
-COMMENT ON TABLE post_analytics IS 'Performance metrics for published posts';
-COMMENT ON TABLE user_streaks IS 'Daily posting streak tracking';
-COMMENT ON TABLE user_settings IS 'User preferences and notification settings';
-COMMENT ON TABLE api_usage_logs IS 'API usage tracking for rate limiting and billing';
