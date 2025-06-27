@@ -183,7 +183,27 @@ const searchTrendContext = async (topic, locationWoeid = "1") => {
 			limit: 5,
 			tbs: "qdr:d", // Past 24 hours
 			scrapeOptions: {
-				formats: ["markdown", "extract"]
+				formats: ["markdown"],
+				extract: {
+					schema: {
+						type: "object",
+						properties: {
+							title: {
+								type: "string",
+								description: "The title of the article"
+							},
+							main_content: {
+								type: "string", 
+								description: "The main content of the article"
+							},
+							summary: {
+								type: "string",
+								description: "A brief summary of the article"
+							}
+						},
+						required: ["title", "main_content"]
+					}
+				}
 			}
 		};
 
@@ -201,9 +221,9 @@ const searchTrendContext = async (topic, locationWoeid = "1") => {
 
 		// Process and summarize the search results
 		const contextSummary = searchResult.data.map(result => ({
-			title: result.title || 'No title',
+			title: result.title || result.extract?.title || 'No title',
 			url: result.url || '',
-			content: result.markdown ? result.markdown.substring(0, 500) : 'No content',
+			content: result.markdown ? result.markdown.substring(0, 500) : (result.extract?.main_content || 'No content').substring(0, 500),
 			extract: result.extract || {}
 		}));
 
