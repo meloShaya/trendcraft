@@ -41,6 +41,7 @@ interface TrendData {
   };
   peakTime: string;
   trendScore: number;
+  locationWoeid?: string; // Add location support
 }
 
 const ContentGenerator: React.FC = () => {
@@ -51,7 +52,8 @@ const ContentGenerator: React.FC = () => {
     platform: 'twitter',
     tone: 'professional',
     includeHashtags: true,
-    targetAudience: ''
+    targetAudience: '',
+    locationWoeid: '1' // Add location to form data
   });
   const [generatedContent, setGeneratedContent] = useState<GeneratedContent | null>(null);
   const [loading, setLoading] = useState(false);
@@ -70,11 +72,12 @@ const ContentGenerator: React.FC = () => {
       try {
         const trendData: TrendData = JSON.parse(savedTrendData);
         
-        // Pre-fill the form with trend data
+        // Pre-fill the form with trend data including location
         setFormData(prev => ({
           ...prev,
           topic: trendData.topic,
-          targetAudience: trendData.demographics.interests.join(', ') || prev.targetAudience
+          targetAudience: trendData.demographics.interests.join(', ') || prev.targetAudience,
+          locationWoeid: trendData.locationWoeid || '1' // Use location from trend data
         }));
 
         // Show notification about the pre-filled trend
@@ -114,7 +117,10 @@ const ContentGenerator: React.FC = () => {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify(formData)
+        body: JSON.stringify({
+          ...formData,
+          locationWoeid: formData.locationWoeid // Include location in request
+        })
       });
 
       if (response.ok) {

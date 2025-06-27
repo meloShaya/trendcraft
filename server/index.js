@@ -15,6 +15,7 @@ import fs from "fs";
 import { Buffer } from "buffer";
 import fetch from "node-fetch";
 import FormData from 'form-data';
+import FirecrawlApp from '@mendable/firecrawl-js';
 
 // Load environment variable
 dotenv.config();
@@ -47,6 +48,19 @@ if (process.env.ELEVENLABS_API_KEY) {
 } else {
 	console.warn(
 		"[WARNING] ELEVENLABS_API_KEY not found in environment variables."
+	);
+}
+
+// Initialize Firecrawl client
+let firecrawlClient = null;
+if (process.env.FIRECRAWL_API_KEY) {
+	firecrawlClient = new FirecrawlApp({
+		apiKey: process.env.FIRECRAWL_API_KEY,
+	});
+	console.log("[OK] Firecrawl API key loaded successfully.");
+} else {
+	console.warn(
+		"[WARNING] FIRECRAWL_API_KEY not found in environment variables."
 	);
 }
 
@@ -141,6 +155,74 @@ try {
 	];
 }
 
+// Function to get location name by woeid
+const getLocationNameByWoeid = (woeid) => {
+	const location = supportedLocations.find(loc => loc.woeid.toString() === woeid.toString());
+	return location ? location.name : "Worldwide";
+};
+
+// Enhanced function to search for trend context using Firecrawl
+const searchTrendContext = async (topic, locationWoeid = "1") => {
+	if (!firecrawlClient) {
+		console.log("Firecrawl not configured - skipping context search");
+		return null;
+	}
+
+	try {
+		// Get location name from woeid
+		const locationName = getLocationNameByWoeid(locationWoeid);
+		
+		console.log(`🔍 Searching for context: "${topic}" in location: ${locationName} (woeid: ${locationWoeid})`);
+		
+		// Create location-specific search query
+		const searchQuery = locationName === "Worldwide" 
+			? `${topic} trending social media news` 
+			: `${topic} trending ${locationName} social media news`;
+
+		const searchOptions = {
+			limit: 5,
+			tbs: "qdr:d", // Past 24 hours
+			scrapeOptions: {
+				formats: ["markdown", "extract"]
+			}
+		};
+
+		// Add location parameter if not worldwide
+		if (locationName !== "Worldwide") {
+			searchOptions.location = locationName;
+		}
+
+		const searchResult = await firecrawlClient.search(searchQuery, searchOptions);
+		
+		if (!searchResult || !searchResult.data || searchResult.data.length === 0) {
+			console.log("No search results found from Firecrawl");
+			return null;
+		}
+
+		// Process and summarize the search results
+		const contextSummary = searchResult.data.map(result => ({
+			title: result.title || 'No title',
+			url: result.url || '',
+			content: result.markdown ? result.markdown.substring(0, 500) : 'No content',
+			extract: result.extract || {}
+		}));
+
+		console.log(`✅ Found ${contextSummary.length} context sources for "${topic}" in ${locationName}`);
+		
+		return {
+			topic,
+			location: locationName,
+			sources: contextSummary,
+			searchQuery,
+			timestamp: new Date().toISOString()
+		};
+
+	} catch (error) {
+		console.error("Error searching for trend context:", error);
+		return null;
+	}
+};
+
 // Enhanced function to fetch trends from RapidAPI (Twitter only)
 const fetchTrendsFromRapidAPI = async (platform = "twitter", location = "1") => {
 	try {
@@ -194,8 +276,11 @@ const fetchTrendsFromRapidAPI = async (platform = "twitter", location = "1") => 
 		}
 
 		const rawTrends = trendsContainer.trends;
+		const asOfTime = trendsContainer.as_of; // Get the actual timestamp from API
+		
 		console.log(`Retrieved ${rawTrends.length} raw trends from RapidAPI for ${platform}`);
 		console.log('Sample trend data:', rawTrends.slice(0, 3));
+		console.log('Trends as_of time:', asOfTime);
 
 		// Transform RapidAPI data to our format
 		const transformedTrends = rawTrends.map((trend, index) => {
@@ -214,7 +299,7 @@ const fetchTrendsFromRapidAPI = async (platform = "twitter", location = "1") => 
 				growth: calculateGrowthFromVolume(volume),
 				platforms: [platform],
 				relatedHashtags: extractHashtagsFromText(keyword),
-				peakTime: "14:00-16:00 UTC", // Default peak time
+				peakTime: formatPeakTime(asOfTime), // Use dynamic time from API
 				demographics: {
 					age: "18-34",
 					interests: generateInterestsFromKeyword(keyword)
@@ -238,6 +323,24 @@ const fetchTrendsFromRapidAPI = async (platform = "twitter", location = "1") => 
 			status: error.response?.status,
 		});
 		return [];
+	}
+};
+
+// Helper function to format peak time from API timestamp
+const formatPeakTime = (asOfTime) => {
+	if (!asOfTime) {
+		return "14:00-16:00 UTC"; // Fallback
+	}
+	
+	try {
+		const date = new Date(asOfTime);
+		const hours = date.getUTCHours();
+		const startHour = String(hours).padStart(2, '0');
+		const endHour = String((hours + 2) % 24).padStart(2, '0');
+		return `${startHour}:00-${endHour}:00 UTC`;
+	} catch (error) {
+		console.error('Error formatting peak time:', error);
+		return "14:00-16:00 UTC"; // Fallback
 	}
 };
 
@@ -342,42 +445,63 @@ const calculateTrendScore = (volume, platform) => {
 	return Math.round(score);
 };
 
-// Enhanced AI Content Generation with Two-Step Process
+// Enhanced AI Content Generation with Three-Step Process
 const generateContentWithAI = async (
 	topic,
 	platform,
 	tone,
 	targetAudience,
 	includeHashtags,
-	isAnalysisOnly = false
+	isAnalysisOnly = false,
+	locationWoeid = "1" // Add location parameter
 ) => {
 	try {
 		const platformConfig = PLATFORM_CONFIGS[platform] || PLATFORM_CONFIGS.twitter;
 
-		// Step 1: Trend Analysis
-		const analysisPrompt = `Analyze the social media trend "${topic}". What is the core emotion, the key talking points, and the general sentiment? Provide a brief, one-sentence analysis focusing on why this topic is trending and what makes it engaging.`;
+		// Step 1: Search for real-world context using Firecrawl (if available)
+		let contextData = null;
+		if (firecrawlClient && !isAnalysisOnly) {
+			console.log('Step 1: Searching for trend context...');
+			contextData = await searchTrendContext(topic, locationWoeid);
+		}
+
+		// Step 2: Trend Analysis with context
+		const locationName = getLocationNameByWoeid(locationWoeid);
+		let analysisPrompt = `Analyze the social media trend "${topic}"`;
 		
-		console.log('Step 1: Analyzing trend...');
+		if (contextData && contextData.sources.length > 0) {
+			analysisPrompt += ` based on these recent sources from ${contextData.location}:\n\n`;
+			contextData.sources.forEach((source, index) => {
+				analysisPrompt += `Source ${index + 1}: ${source.title}\n${source.content.substring(0, 200)}...\n\n`;
+			});
+			analysisPrompt += `What is the core emotion, the key talking points, and the general sentiment around "${topic}" in ${contextData.location}? Provide a brief, one-sentence analysis focusing on why this topic is trending and what makes it engaging.`;
+		} else {
+			analysisPrompt += ` in ${locationName}. What is the core emotion, the key talking points, and the general sentiment? Provide a brief, one-sentence analysis focusing on why this topic is trending and what makes it engaging.`;
+		}
+		
+		console.log('Step 2: Analyzing trend with context...');
 		const analysisResult = await model.generateContent(analysisPrompt);
 		const trendAnalysis = analysisResult.response.text().trim();
 		console.log('Trend Analysis:', trendAnalysis);
 
 		// If only analysis is requested, return early
 		if (isAnalysisOnly) {
-			return { analysis: trendAnalysis };
+			return { analysis: trendAnalysis, context: contextData };
 		}
 
-		// Step 2: Enhanced Content Generation with Viral Hooks
+		// Step 3: Enhanced Content Generation with Viral Hooks and Context
 		const enhancedPrompt = createEnhancedSystemPrompt(
 			topic,
 			platform,
 			tone,
 			targetAudience,
 			includeHashtags,
-			trendAnalysis
+			trendAnalysis,
+			contextData,
+			locationName
 		);
 
-		console.log('Step 2: Generating viral content...');
+		console.log('Step 3: Generating viral content with context...');
 		const result = await model.generateContent(enhancedPrompt);
 		const response = await result.response;
 		let content = response.text().trim();
@@ -397,7 +521,7 @@ const generateContentWithAI = async (
 			content = content.substring(0, platformConfig.maxCharacters - 3) + "...";
 		}
 
-		const viralScore = calculateEnhancedViralScore(content, platform, trendAnalysis);
+		const viralScore = calculateEnhancedViralScore(content, platform, trendAnalysis, contextData);
 		const hashtagRegex = /#[\w]+/g;
 		const hashtags = content.match(hashtagRegex) || [];
 
@@ -410,6 +534,7 @@ const generateContentWithAI = async (
 			platform,
 			recommendations,
 			trendAnalysis,
+			contextData,
 			platformOptimization: {
 				characterCount: content.length,
 				characterLimit: platformConfig.maxCharacters,
@@ -429,13 +554,26 @@ const generateContentWithAI = async (
 	}
 };
 
-// Enhanced system prompt with viral hooks and trend analysis
-const createEnhancedSystemPrompt = (topic, platform, tone, targetAudience, includeHashtags, trendAnalysis) => {
+// Enhanced system prompt with viral hooks, trend analysis, and real-world context
+const createEnhancedSystemPrompt = (topic, platform, tone, targetAudience, includeHashtags, trendAnalysis, contextData, locationName) => {
 	const platformConfig = PLATFORM_CONFIGS[platform] || PLATFORM_CONFIGS.twitter;
+
+	let contextSection = "";
+	if (contextData && contextData.sources.length > 0) {
+		contextSection = `
+REAL-WORLD CONTEXT FROM ${contextData.location.toUpperCase()}:
+${contextData.sources.map((source, index) => 
+	`• ${source.title}: ${source.content.substring(0, 150)}...`
+).join('\n')}
+
+`;
+	}
 
 	return `You are TrendCraft AI, an expert viral content generator. Your ONLY job is to generate ONE piece of ready-to-publish content for ${platform}.
 
 TREND ANALYSIS CONTEXT: ${trendAnalysis}
+
+${contextSection}LOCATION CONTEXT: This content is for ${locationName} audience. Consider local culture, language nuances, and regional relevance.
 
 CRITICAL RULES - FOLLOW EXACTLY:
 1. Generate ONLY the final content text - no explanations, no options, no meta-commentary
@@ -501,12 +639,13 @@ ${platform === "tiktok" ? `
 - Keep descriptions engaging and fun` : ""}
 
 TOPIC: ${topic}
+LOCATION: ${locationName}
 
 Generate the viral content now - ONLY the content, nothing else:`;
 };
 
-// Enhanced viral score calculation
-const calculateEnhancedViralScore = (content, platform, trendAnalysis) => {
+// Enhanced viral score calculation with context bonus
+const calculateEnhancedViralScore = (content, platform, trendAnalysis, contextData) => {
 	let score = 50;
 	const platformConfig = PLATFORM_CONFIGS[platform] || PLATFORM_CONFIGS.twitter;
 
@@ -570,6 +709,12 @@ const calculateEnhancedViralScore = (content, platform, trendAnalysis) => {
 	// Viral content patterns
 	if (content.match(/\b(new|breaking|exclusive|first)\b/gi)) score += 8;
 	if (content.match(/\b(tips|secrets|hacks|tricks)\b/gi)) score += 10;
+
+	// Context bonus - if we have real-world context, boost the score
+	if (contextData && contextData.sources && contextData.sources.length > 0) {
+		score += 10; // Bonus for having real-world context
+		console.log('Applied context bonus: +10 points');
+	}
 
 	// Trend analysis bonus
 	if (trendAnalysis && trendAnalysis.length > 0) {
@@ -890,16 +1035,17 @@ app.get("/api/trends/locations", authenticateToken, (req, res) => {
 	res.json(supportedLocations);
 });
 
-// Enhanced Content Routes with two-step AI generation
+// Enhanced Content Routes with three-step AI generation and location context
 app.post("/api/content/generate", authenticateToken, async (req, res) => {
-	const { topic, platform, tone, includeHashtags, targetAudience, isAnalysisOnly } = req.body;
+	const { topic, platform, tone, includeHashtags, targetAudience, isAnalysisOnly, locationWoeid } = req.body;
 	const generatedContent = await generateContentWithAI(
 		topic,
 		platform,
 		tone,
 		targetAudience,
 		includeHashtags,
-		isAnalysisOnly
+		isAnalysisOnly,
+		locationWoeid // Pass location to AI generation
 	);
 	res.json(generatedContent);
 });
@@ -1036,6 +1182,7 @@ app.listen(PORT, () => {
 	console.log(`🎯 Frontend should run on: http://localhost:5173`);
 	console.log(`🤖 Gemini AI: ${process.env.GEMINI_API_KEY ? "Configured" : "Not configured"}`);
 	console.log(`🕷️ RapidAPI: ${process.env.X_RapidAPI_Key ? "Configured - REAL DATA ONLY" : "Not configured - NO FALLBACKS"}`);
+	console.log(`🔍 Firecrawl: ${process.env.FIRECRAWL_API_KEY ? "Configured - ENHANCED CONTEXT" : "Not configured"}`);
 	console.log(`🎤 ElevenLabs: ${process.env.ELEVENLABS_API_KEY ? "Configured" : "Not configured"}`);
 	console.log("✅ Server started successfully!");
 });

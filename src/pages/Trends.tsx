@@ -34,6 +34,7 @@ const Trends: React.FC = () => {
   const [selectedPlatform, setSelectedPlatform] = useState('twitter');
   const [selectedLocation, setSelectedLocation] = useState('1'); // Worldwide by default
   const [analyzingTrend, setAnalyzingTrend] = useState<number | null>(null);
+  const [processingStage, setProcessingStage] = useState<string>('');
 
   // Load supported locations
   useEffect(() => {
@@ -123,7 +124,12 @@ const Trends: React.FC = () => {
     setAnalyzingTrend(trend.id);
     
     try {
-      // Step 1: Analyze the trend first
+      // Step 1: Search for context
+      setProcessingStage('🔍 Searching for context...');
+      
+      // Step 2: Analyze the trend with context and location
+      setProcessingStage('🧠 Analyzing trend...');
+      
       const analysisResponse = await fetch('/api/content/generate', {
         method: 'POST',
         headers: {
@@ -136,13 +142,17 @@ const Trends: React.FC = () => {
           tone: 'professional',
           includeHashtags: true,
           targetAudience: trend.demographics.interests.join(', ') || '',
-          isAnalysisOnly: true // Flag to indicate we want analysis first
+          isAnalysisOnly: true,
+          locationWoeid: selectedLocation // Pass the selected location
         })
       });
 
       if (!analysisResponse.ok) {
         throw new Error('Failed to analyze trend');
       }
+
+      // Step 3: Finalize
+      setProcessingStage('✨ Finalizing...');
 
       // Store the trend data with analysis in sessionStorage
       const trendData = {
@@ -154,7 +164,8 @@ const Trends: React.FC = () => {
         trendScore: trend.trendScore,
         platform: selectedPlatform,
         volume: trend.volume,
-        growth: trend.growth
+        growth: trend.growth,
+        locationWoeid: selectedLocation // Include location in stored data
       };
       
       sessionStorage.setItem('selectedTrend', JSON.stringify(trendData));
@@ -170,13 +181,15 @@ const Trends: React.FC = () => {
         hashtags: trend.relatedHashtags,
         demographics: trend.demographics,
         peakTime: trend.peakTime,
-        trendScore: trend.trendScore
+        trendScore: trend.trendScore,
+        locationWoeid: selectedLocation
       };
       
       sessionStorage.setItem('selectedTrend', JSON.stringify(trendData));
       navigate('/generate');
     } finally {
       setAnalyzingTrend(null);
+      setProcessingStage('');
     }
   };
 
@@ -312,21 +325,21 @@ const Trends: React.FC = () => {
           </div>
           <div className="flex-1">
             <h3 className="text-sm font-medium text-blue-900 dark:text-blue-200 mb-2">
-              🚀 Enhanced AI Content Generation
+              🚀 Enhanced AI Content Generation with Location Context
             </h3>
             <p className="text-sm text-blue-700 dark:text-blue-300 mb-3">
-              Our AI now uses a sophisticated two-step process: first analyzing the trend's core emotion and talking points, 
-              then generating viral content with proven hooks and psychological triggers.
+              Our AI now uses a sophisticated three-step process: searching for real-time context from your selected location, 
+              analyzing the trend's core emotion and talking points, then generating viral content with proven hooks and cultural relevance.
             </p>
             <div className="flex flex-wrap gap-2">
               <span className="px-2 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 text-xs rounded-full">
-                ✨ Viral Content Hooks
+                🔍 Real-time Context Search
               </span>
               <span className="px-2 py-1 bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-200 text-xs rounded-full">
-                🧠 Trend Analysis
+                🧠 Location-aware Analysis
               </span>
               <span className="px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200 text-xs rounded-full">
-                🎯 Platform Optimization
+                🎯 Cultural Optimization
               </span>
             </div>
           </div>
@@ -425,12 +438,14 @@ const Trends: React.FC = () => {
                   {analyzingTrend === trend.id ? (
                     <>
                       <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white"></div>
-                      <span>Analyzing...</span>
+                      <span className="hidden sm:inline">{processingStage}</span>
+                      <span className="sm:hidden">Processing...</span>
                     </>
                   ) : (
                     <>
                       <Zap className="h-3 w-3 sm:h-4 sm:w-4" />
-                      <span>Create Viral Content</span>
+                      <span className="hidden sm:inline">Create Viral Content</span>
+                      <span className="sm:hidden">Create</span>
                     </>
                   )}
                 </button>
