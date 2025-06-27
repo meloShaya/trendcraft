@@ -9,13 +9,14 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { ElevenLabsClient } from "elevenlabs";
 import { WebSocket as WsClient } from "ws";
 // import * as fs from "fs";
-import path from 'path';
-import os from 'os';
+import path from "path";
+import os from "os";
 import fs from "fs";
 import { Buffer } from "buffer";
 import fetch from "node-fetch";
-import FormData from 'form-data';
-import FirecrawlApp from '@mendable/firecrawl-js';
+import FormData from "form-data";
+import FirecrawlApp from "@mendable/firecrawl-js";
+import { supabase } from "./supabaseClient.js";
 
 // Load environment variable
 dotenv.config();
@@ -91,73 +92,33 @@ app.get("/", (req, res) => {
 	});
 });
 
-// Mock Data Store
-let users = [
-	{
-		id: 1,
-		username: "demo",
-		email: "demo@trendcraft.ai",
-		password: bcrypt.hashSync("demo123", 10),
-		profile: {
-			name: "Demo User",
-			bio: "Content creator exploring AI-powered social media",
-			avatar: "https://images.pexels.com/photos/614810/pexels-photo-614810.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&fit=crop",
-		},
-		createdAt: new Date("2024-01-01"),
-	},
-];
-
-let posts = [
-	{
-		id: 1,
-		userId: 1,
-		content:
-			"🚀 Just discovered the future of content creation with AI! The possibilities are endless when you combine creativity with technology. What's your take on AI-powered social media? #AI #ContentCreation #TechTrends",
-		platform: "twitter",
-		viralScore: 87,
-		engagement: { likes: 342, retweets: 89, comments: 23, shares: 45 },
-		hashtags: ["#AI", "#ContentCreation", "#TechTrends"],
-		status: "published",
-		scheduledFor: new Date(),
-		createdAt: new Date("2024-01-15"),
-		performance: { impressions: 12500, reach: 8900, clickThrough: 156 },
-	},
-	{
-		id: 2,
-		userId: 1,
-		content:
-			"💡 Hot take: The best social media strategy isn't about posting more—it's about posting smarter. Data-driven content creation is the game changer we've been waiting for! #SocialMediaStrategy #DataDriven #MarketingTips",
-		platform: "twitter",
-		viralScore: 92,
-		engagement: { likes: 567, retweets: 143, comments: 67, shares: 89 },
-		hashtags: ["#SocialMediaStrategy", "#DataDriven", "#MarketingTips"],
-		status: "published",
-		scheduledFor: new Date(Date.now() - 86400000),
-		createdAt: new Date("2024-01-14"),
-		performance: { impressions: 18300, reach: 14200, clickThrough: 234 },
-	},
-];
-
 // Load supported locations for Twitter trends
 let supportedLocations = [];
 try {
-	const locationsData = fs.readFileSync(path.join(process.cwd(), 'server', 'X_trends_supported_locations.json'), 'utf8');
+	const locationsData = fs.readFileSync(
+		path.join(process.cwd(), "server", "X_trends_supported_locations.json"),
+		"utf8"
+	);
 	supportedLocations = JSON.parse(locationsData);
-	console.log(`[OK] Loaded ${supportedLocations.length} supported locations for Twitter trends`);
+	console.log(
+		`[OK] Loaded ${supportedLocations.length} supported locations for Twitter trends`
+	);
 } catch (error) {
-	console.error('[ERROR] Failed to load supported locations:', error.message);
+	console.error("[ERROR] Failed to load supported locations:", error.message);
 	// Fallback to default locations
 	supportedLocations = [
 		{ name: "Worldwide", woeid: 1 },
 		{ name: "United States", woeid: 23424977 },
 		{ name: "United Kingdom", woeid: 23424975 },
-		{ name: "Canada", woeid: 23424775 }
+		{ name: "Canada", woeid: 23424775 },
 	];
 }
 
 // Function to get location name by woeid
 const getLocationNameByWoeid = (woeid) => {
-	const location = supportedLocations.find(loc => loc.woeid.toString() === woeid.toString());
+	const location = supportedLocations.find(
+		(loc) => loc.woeid.toString() === woeid.toString()
+	);
 	return location ? location.name : "Worldwide";
 };
 
@@ -171,13 +132,16 @@ const searchTrendContext = async (topic, locationWoeid = "1") => {
 	try {
 		// Get location name from woeid
 		const locationName = getLocationNameByWoeid(locationWoeid);
-		
-		console.log(`🔍 Searching for context: "${topic}" in location: ${locationName} (woeid: ${locationWoeid})`);
-		
+
+		console.log(
+			`🔍 Searching for context: "${topic}" in location: ${locationName} (woeid: ${locationWoeid})`
+		);
+
 		// Create location-specific search query
-		const searchQuery = locationName === "Worldwide" 
-			? `${topic} trending social media news` 
-			: `${topic} trending ${locationName} social media news`;
+		const searchQuery =
+			locationName === "Worldwide"
+				? `${topic} trending social media news`
+				: `${topic} trending ${locationName} social media news`;
 
 		const searchOptions = {
 			limit: 5,
@@ -190,21 +154,21 @@ const searchTrendContext = async (topic, locationWoeid = "1") => {
 						properties: {
 							title: {
 								type: "string",
-								description: "The title of the article"
+								description: "The title of the article",
 							},
 							main_content: {
-								type: "string", 
-								description: "The main content of the article"
+								type: "string",
+								description: "The main content of the article",
 							},
 							summary: {
 								type: "string",
-								description: "A brief summary of the article"
-							}
+								description: "A brief summary of the article",
+							},
 						},
-						required: ["title", "main_content"]
-					}
-				}
-			}
+						required: ["title", "main_content"],
+					},
+				},
+			},
 		};
 
 		// Add location parameter if not worldwide
@@ -212,31 +176,44 @@ const searchTrendContext = async (topic, locationWoeid = "1") => {
 			searchOptions.location = locationName;
 		}
 
-		const searchResult = await firecrawlClient.search(searchQuery, searchOptions);
-		
-		if (!searchResult || !searchResult.data || searchResult.data.length === 0) {
+		const searchResult = await firecrawlClient.search(
+			searchQuery,
+			searchOptions
+		);
+
+		if (
+			!searchResult ||
+			!searchResult.data ||
+			searchResult.data.length === 0
+		) {
 			console.log("No search results found from Firecrawl");
 			return null;
 		}
 
 		// Process and summarize the search results
-		const contextSummary = searchResult.data.map(result => ({
-			title: result.title || result.extract?.title || 'No title',
-			url: result.url || '',
-			content: result.markdown ? result.markdown.substring(0, 500) : (result.extract?.main_content || 'No content').substring(0, 500),
-			extract: result.extract || {}
+		const contextSummary = searchResult.data.map((result) => ({
+			title: result.title || result.extract?.title || "No title",
+			url: result.url || "",
+			content: result.markdown
+				? result.markdown.substring(0, 500)
+				: (result.extract?.main_content || "No content").substring(
+						0,
+						500
+				  ),
+			extract: result.extract || {},
 		}));
 
-		console.log(`✅ Found ${contextSummary.length} context sources for "${topic}" in ${locationName}`);
-		
+		console.log(
+			`✅ Found ${contextSummary.length} context sources for "${topic}" in ${locationName}`
+		);
+
 		return {
 			topic,
 			location: locationName,
 			sources: contextSummary,
 			searchQuery,
-			timestamp: new Date().toISOString()
+			timestamp: new Date().toISOString(),
 		};
-
 	} catch (error) {
 		console.error("Error searching for trend context:", error);
 		return null;
@@ -244,13 +221,20 @@ const searchTrendContext = async (topic, locationWoeid = "1") => {
 };
 
 // Enhanced function to fetch trends from RapidAPI (Twitter only)
-const fetchTrendsFromRapidAPI = async (platform = "twitter", location = "1") => {
+const fetchTrendsFromRapidAPI = async (
+	platform = "twitter",
+	location = "1"
+) => {
 	try {
-		console.log(`Fetching REAL trends for platform: ${platform}, location: ${location} via RapidAPI`);
+		console.log(
+			`Fetching REAL trends for platform: ${platform}, location: ${location} via RapidAPI`
+		);
 
 		// Only Twitter is supported via RapidAPI
 		if (platform !== "twitter") {
-			console.log(`Platform ${platform} not supported by RapidAPI - returning empty array`);
+			console.log(
+				`Platform ${platform} not supported by RapidAPI - returning empty array`
+			);
 			return [];
 		}
 
@@ -261,55 +245,67 @@ const fetchTrendsFromRapidAPI = async (platform = "twitter", location = "1") => 
 		}
 
 		const options = {
-			method: 'GET',
-			url: 'https://twitter-x.p.rapidapi.com/trends/',
+			method: "GET",
+			url: "https://twitter-x.p.rapidapi.com/trends/",
 			params: { woeid: location },
 			headers: {
-				'x-rapidapi-key': rapidApiKey,
-				'x-rapidapi-host': 'twitter-x.p.rapidapi.com'
-			}
+				"x-rapidapi-key": rapidApiKey,
+				"x-rapidapi-host": "twitter-x.p.rapidapi.com",
+			},
 		};
 
-		console.log(`Calling RapidAPI with options:`, { ...options, headers: { ...options.headers, 'x-rapidapi-key': '[HIDDEN]' } });
+		console.log(`Calling RapidAPI with options:`, {
+			...options,
+			headers: { ...options.headers, "x-rapidapi-key": "[HIDDEN]" },
+		});
 
 		const response = await axios.request(options);
 		const apiData = response.data;
 
-		console.log('Raw API response structure:', {
+		console.log("Raw API response structure:", {
 			isArray: Array.isArray(apiData),
 			length: apiData?.length,
-			firstItemKeys: apiData?.[0] ? Object.keys(apiData[0]) : 'N/A',
-			trendsLength: apiData?.[0]?.trends?.length || 'N/A'
+			firstItemKeys: apiData?.[0] ? Object.keys(apiData[0]) : "N/A",
+			trendsLength: apiData?.[0]?.trends?.length || "N/A",
 		});
 
 		// Extract trends from the nested structure
 		// API returns: [{ trends: [...], as_of: "...", created_at: "...", locations: [...] }]
 		if (!Array.isArray(apiData) || apiData.length === 0) {
-			console.log('Invalid API response structure:', apiData);
+			console.log("Invalid API response structure:", apiData);
 			return [];
 		}
 
 		const trendsContainer = apiData[0];
 		if (!trendsContainer || !Array.isArray(trendsContainer.trends)) {
-			console.log('No trends array found in API response:', trendsContainer);
+			console.log(
+				"No trends array found in API response:",
+				trendsContainer
+			);
 			return [];
 		}
 
 		const rawTrends = trendsContainer.trends;
 		const asOfTime = trendsContainer.as_of; // Get the actual timestamp from API
-		
-		console.log(`Retrieved ${rawTrends.length} raw trends from RapidAPI for ${platform}`);
-		console.log('Sample trend data:', rawTrends.slice(0, 3));
-		console.log('Trends as_of time:', asOfTime);
+
+		console.log(
+			`Retrieved ${rawTrends.length} raw trends from RapidAPI for ${platform}`
+		);
+		console.log("Sample trend data:", rawTrends.slice(0, 3));
+		console.log("Trends as_of time:", asOfTime);
 
 		// Transform RapidAPI data to our format
 		const transformedTrends = rawTrends.map((trend, index) => {
-			const keyword = trend.name || trend.query || 'Unknown';
+			const keyword = trend.name || trend.query || "Unknown";
 			// Use actual tweet_volume from API, fallback to 0 if null
 			const volume = trend.tweet_volume || 0;
-			
-			console.log(`Processing trend ${index + 1}: "${keyword}" with volume: ${volume}`);
-			
+
+			console.log(
+				`Processing trend ${
+					index + 1
+				}: "${keyword}" with volume: ${volume}`
+			);
+
 			return {
 				id: index + 1,
 				keyword: cleanKeyword(keyword),
@@ -322,19 +318,23 @@ const fetchTrendsFromRapidAPI = async (platform = "twitter", location = "1") => 
 				peakTime: formatPeakTime(asOfTime), // Use dynamic time from API
 				demographics: {
 					age: "18-34",
-					interests: generateInterestsFromKeyword(keyword)
-				}
+					interests: generateInterestsFromKeyword(keyword),
+				},
 			};
 		});
 
 		// Filter out trends with "Unknown" keywords
-		const validTrends = transformedTrends.filter(trend => 
-			trend.keyword && trend.keyword !== 'Unknown' && trend.keyword.length > 0
+		const validTrends = transformedTrends.filter(
+			(trend) =>
+				trend.keyword &&
+				trend.keyword !== "Unknown" &&
+				trend.keyword.length > 0
 		);
 
-		console.log(`Successfully transformed ${validTrends.length} valid trends for ${platform}`);
+		console.log(
+			`Successfully transformed ${validTrends.length} valid trends for ${platform}`
+		);
 		return validTrends;
-
 	} catch (error) {
 		console.error(`Error fetching trends from RapidAPI:`, {
 			error: error.response?.data || error.message,
@@ -351,15 +351,15 @@ const formatPeakTime = (asOfTime) => {
 	if (!asOfTime) {
 		return "14:00-16:00 UTC"; // Fallback
 	}
-	
+
 	try {
 		const date = new Date(asOfTime);
 		const hours = date.getUTCHours();
-		const startHour = String(hours).padStart(2, '0');
-		const endHour = String((hours + 2) % 24).padStart(2, '0');
+		const startHour = String(hours).padStart(2, "0");
+		const endHour = String((hours + 2) % 24).padStart(2, "0");
 		return `${startHour}:00-${endHour}:00 UTC`;
 	} catch (error) {
-		console.error('Error formatting peak time:', error);
+		console.error("Error formatting peak time:", error);
 		return "14:00-16:00 UTC"; // Fallback
 	}
 };
@@ -367,73 +367,102 @@ const formatPeakTime = (asOfTime) => {
 // Helper functions for data processing
 const cleanKeyword = (keyword) => {
 	if (!keyword || typeof keyword !== "string") return null;
-	
+
 	// Remove URL encoding and clean up the keyword
 	let cleaned = decodeURIComponent(keyword);
-	
+
 	// Remove hashtags and @ symbols for cleaner display
 	cleaned = cleaned.replace(/^[#@]+/, "");
-	
+
 	// Limit length and trim
 	cleaned = cleaned.substring(0, 100).trim();
-	
+
 	return cleaned.length > 0 ? cleaned : null;
 };
 
 const categorizeKeyword = (keyword) => {
 	const lowerKeyword = keyword.toLowerCase();
-	
-	if (lowerKeyword.includes('tech') || lowerKeyword.includes('ai') || lowerKeyword.includes('crypto') || lowerKeyword.includes('cyber')) {
-		return 'Technology';
-	} else if (lowerKeyword.includes('sport') || lowerKeyword.includes('game') || lowerKeyword.includes('football') || lowerKeyword.includes('olympic')) {
-		return 'Sports';
-	} else if (lowerKeyword.includes('music') || lowerKeyword.includes('movie') || lowerKeyword.includes('celebrity') || lowerKeyword.includes('birthday')) {
-		return 'Entertainment';
-	} else if (lowerKeyword.includes('politic') || lowerKeyword.includes('election') || lowerKeyword.includes('government')) {
-		return 'Politics';
-	} else if (lowerKeyword.includes('business') || lowerKeyword.includes('market') || lowerKeyword.includes('economy')) {
-		return 'Business';
-	} else if (lowerKeyword.includes('news') || lowerKeyword.includes('breaking')) {
-		return 'News';
+
+	if (
+		lowerKeyword.includes("tech") ||
+		lowerKeyword.includes("ai") ||
+		lowerKeyword.includes("crypto") ||
+		lowerKeyword.includes("cyber")
+	) {
+		return "Technology";
+	} else if (
+		lowerKeyword.includes("sport") ||
+		lowerKeyword.includes("game") ||
+		lowerKeyword.includes("football") ||
+		lowerKeyword.includes("olympic")
+	) {
+		return "Sports";
+	} else if (
+		lowerKeyword.includes("music") ||
+		lowerKeyword.includes("movie") ||
+		lowerKeyword.includes("celebrity") ||
+		lowerKeyword.includes("birthday")
+	) {
+		return "Entertainment";
+	} else if (
+		lowerKeyword.includes("politic") ||
+		lowerKeyword.includes("election") ||
+		lowerKeyword.includes("government")
+	) {
+		return "Politics";
+	} else if (
+		lowerKeyword.includes("business") ||
+		lowerKeyword.includes("market") ||
+		lowerKeyword.includes("economy")
+	) {
+		return "Business";
+	} else if (
+		lowerKeyword.includes("news") ||
+		lowerKeyword.includes("breaking")
+	) {
+		return "News";
 	}
-	
-	return 'General';
+
+	return "General";
 };
 
 const generateInterestsFromKeyword = (keyword) => {
 	const category = categorizeKeyword(keyword);
 	const interestMap = {
-		'Technology': ['innovation', 'startups', 'gadgets'],
-		'Sports': ['athletics', 'competition', 'fitness'],
-		'Entertainment': ['movies', 'music', 'celebrities'],
-		'Politics': ['current events', 'governance', 'policy'],
-		'Business': ['entrepreneurship', 'finance', 'marketing'],
-		'News': ['current events', 'breaking news', 'journalism'],
-		'General': ['trending topics', 'social media', 'culture']
+		Technology: ["innovation", "startups", "gadgets"],
+		Sports: ["athletics", "competition", "fitness"],
+		Entertainment: ["movies", "music", "celebrities"],
+		Politics: ["current events", "governance", "policy"],
+		Business: ["entrepreneurship", "finance", "marketing"],
+		News: ["current events", "breaking news", "journalism"],
+		General: ["trending topics", "social media", "culture"],
 	};
-	
-	return interestMap[category] || interestMap['General'];
+
+	return interestMap[category] || interestMap["General"];
 };
 
 const extractHashtagsFromText = (text) => {
 	if (!text || typeof text !== "string") return [];
-	
+
 	// First, try to find existing hashtags
 	const hashtagRegex = /#[\w]+/g;
 	const matches = text.match(hashtagRegex) || [];
-	
+
 	// If hashtags found, return them
 	if (matches.length > 0) {
 		return matches.slice(0, 5);
 	}
-	
+
 	// If no hashtags found, generate some based on the text
-	const words = text.split(' ')
-		.filter(word => word.length > 3)
-		.filter(word => !word.includes('http'))
-		.filter(word => !/^\d+$/.test(word)); // Remove pure numbers
-	
-	return words.slice(0, 3).map(word => `#${word.replace(/[^a-zA-Z0-9]/g, '')}`);
+	const words = text
+		.split(" ")
+		.filter((word) => word.length > 3)
+		.filter((word) => !word.includes("http"))
+		.filter((word) => !/^\d+$/.test(word)); // Remove pure numbers
+
+	return words
+		.slice(0, 3)
+		.map((word) => `#${word.replace(/[^a-zA-Z0-9]/g, "")}`);
 };
 
 const calculateGrowthFromVolume = (volume) => {
@@ -476,33 +505,36 @@ const generateContentWithAI = async (
 	locationWoeid = "1" // Add location parameter
 ) => {
 	try {
-		const platformConfig = PLATFORM_CONFIGS[platform] || PLATFORM_CONFIGS.twitter;
+		const platformConfig =
+			PLATFORM_CONFIGS[platform] || PLATFORM_CONFIGS.twitter;
 
 		// Step 1: Search for real-world context using Firecrawl (if available)
 		let contextData = null;
 		if (firecrawlClient && !isAnalysisOnly) {
-			console.log('Step 1: Searching for trend context...');
+			console.log("Step 1: Searching for trend context...");
 			contextData = await searchTrendContext(topic, locationWoeid);
 		}
 
 		// Step 2: Trend Analysis with context
 		const locationName = getLocationNameByWoeid(locationWoeid);
 		let analysisPrompt = `Analyze the social media trend "${topic}"`;
-		
+
 		if (contextData && contextData.sources.length > 0) {
 			analysisPrompt += ` based on these recent sources from ${contextData.location}:\n\n`;
 			contextData.sources.forEach((source, index) => {
-				analysisPrompt += `Source ${index + 1}: ${source.title}\n${source.content.substring(0, 200)}...\n\n`;
+				analysisPrompt += `Source ${index + 1}: ${
+					source.title
+				}\n${source.content.substring(0, 200)}...\n\n`;
 			});
 			analysisPrompt += `What is the core emotion, the key talking points, and the general sentiment around "${topic}" in ${contextData.location}? Provide a brief, one-sentence analysis focusing on why this topic is trending and what makes it engaging.`;
 		} else {
 			analysisPrompt += ` in ${locationName}. What is the core emotion, the key talking points, and the general sentiment? Provide a brief, one-sentence analysis focusing on why this topic is trending and what makes it engaging.`;
 		}
-		
-		console.log('Step 2: Analyzing trend with context...');
+
+		console.log("Step 2: Analyzing trend with context...");
 		const analysisResult = await model.generateContent(analysisPrompt);
 		const trendAnalysis = analysisResult.response.text().trim();
-		console.log('Trend Analysis:', trendAnalysis);
+		console.log("Trend Analysis:", trendAnalysis);
 
 		// If only analysis is requested, return early
 		if (isAnalysisOnly) {
@@ -521,7 +553,7 @@ const generateContentWithAI = async (
 			locationName
 		);
 
-		console.log('Step 3: Generating viral content with context...');
+		console.log("Step 3: Generating viral content with context...");
 		const result = await model.generateContent(enhancedPrompt);
 		const response = await result.response;
 		let content = response.text().trim();
@@ -538,14 +570,24 @@ const generateContentWithAI = async (
 
 		// Ensure content doesn't exceed platform limits
 		if (content.length > platformConfig.maxCharacters) {
-			content = content.substring(0, platformConfig.maxCharacters - 3) + "...";
+			content =
+				content.substring(0, platformConfig.maxCharacters - 3) + "...";
 		}
 
-		const viralScore = calculateEnhancedViralScore(content, platform, trendAnalysis, contextData);
+		const viralScore = calculateEnhancedViralScore(
+			content,
+			platform,
+			trendAnalysis,
+			contextData
+		);
 		const hashtagRegex = /#[\w]+/g;
 		const hashtags = content.match(hashtagRegex) || [];
 
-		const recommendations = generatePlatformRecommendations(platform, topic, viralScore);
+		const recommendations = generatePlatformRecommendations(
+			platform,
+			topic,
+			viralScore
+		);
 
 		return {
 			content,
@@ -567,24 +609,43 @@ const generateContentWithAI = async (
 	} catch (error) {
 		console.error("Error generating content with Gemini AI:", error);
 
-		const platformConfig = PLATFORM_CONFIGS[platform] || PLATFORM_CONFIGS.twitter;
-		const fallbackContent = generateFallbackContent(topic, platform, tone, platformConfig);
+		const platformConfig =
+			PLATFORM_CONFIGS[platform] || PLATFORM_CONFIGS.twitter;
+		const fallbackContent = generateFallbackContent(
+			topic,
+			platform,
+			tone,
+			platformConfig
+		);
 
 		return fallbackContent;
 	}
 };
 
 // Enhanced system prompt with viral hooks, trend analysis, and real-world context
-const createEnhancedSystemPrompt = (topic, platform, tone, targetAudience, includeHashtags, trendAnalysis, contextData, locationName) => {
-	const platformConfig = PLATFORM_CONFIGS[platform] || PLATFORM_CONFIGS.twitter;
+const createEnhancedSystemPrompt = (
+	topic,
+	platform,
+	tone,
+	targetAudience,
+	includeHashtags,
+	trendAnalysis,
+	contextData,
+	locationName
+) => {
+	const platformConfig =
+		PLATFORM_CONFIGS[platform] || PLATFORM_CONFIGS.twitter;
 
 	let contextSection = "";
 	if (contextData && contextData.sources.length > 0) {
 		contextSection = `
 REAL-WORLD CONTEXT FROM ${contextData.location.toUpperCase()}:
-${contextData.sources.map((source, index) => 
-	`• ${source.title}: ${source.content.substring(0, 150)}...`
-).join('\n')}
+${contextData.sources
+	.map(
+		(source, index) =>
+			`• ${source.title}: ${source.content.substring(0, 150)}...`
+	)
+	.join("\n")}
 
 `;
 	}
@@ -601,10 +662,16 @@ CRITICAL RULES - FOLLOW EXACTLY:
 3. Do NOT provide multiple versions or choices - generate exactly ONE piece of content
 4. Do NOT explain what you're doing or why
 5. The response should be ONLY the content that can be directly posted to ${platform}
-6. Maximum ${platformConfig.maxCharacters} characters - strictly enforce this limit
+6. Maximum ${
+		platformConfig.maxCharacters
+	} characters - strictly enforce this limit
 7. Use ${tone} tone throughout
 8. Target audience: ${targetAudience || "general audience"}
-9. ${includeHashtags ? `Include ${platformConfig.optimalHashtags} relevant hashtags` : "Do not include hashtags"}
+9. ${
+		includeHashtags
+			? `Include ${platformConfig.optimalHashtags} relevant hashtags`
+			: "Do not include hashtags"
+	}
 
 VIRAL CONTENT HOOKS - Use ONE of these proven techniques:
 - Bold Claims: "This will change everything you know about..."
@@ -623,40 +690,60 @@ VIRAL INDICATORS - Include these elements:
 - Numbers and specifics: exact percentages, timeframes, quantities
 
 PLATFORM-SPECIFIC REQUIREMENTS FOR ${platform.toUpperCase()}:
-${platform === "twitter" ? `
+${
+	platform === "twitter"
+		? `
 - Keep under 280 characters
 - Be punchy and engaging
 - Include 1-2 hashtags maximum if requested
 - Use engaging questions or calls for interaction
-- Consider emojis sparingly but effectively` : ""}
+- Consider emojis sparingly but effectively`
+		: ""
+}
 
-${platform === "linkedin" ? `
+${
+	platform === "linkedin"
+		? `
 - Professional tone with personal insights
 - Can be longer form (up to 3000 characters)
 - Include 3-5 industry hashtags if requested
 - Focus on value and professional growth
-- Include professional experiences or lessons` : ""}
+- Include professional experiences or lessons`
+		: ""
+}
 
-${platform === "instagram" ? `
+${
+	platform === "instagram"
+		? `
 - Visual-first approach
 - Use 8-15 hashtags if requested
 - Include emojis and line breaks for readability
 - Focus on lifestyle and visual appeal
-- Include "link in bio" style CTAs` : ""}
+- Include "link in bio" style CTAs`
+		: ""
+}
 
-${platform === "facebook" ? `
+${
+	platform === "facebook"
+		? `
 - Community-focused content
 - Can be longer form
 - Use 1-3 hashtags if requested
 - Focus on shareable, valuable content
-- Encourage community interaction` : ""}
+- Encourage community interaction`
+		: ""
+}
 
-${platform === "tiktok" ? `
+${
+	platform === "tiktok"
+		? `
 - Video-first content description
 - Use 3-7 hashtags including trending ones if requested
 - Focus on entertainment and trends
 - Include challenge or duet CTAs
-- Keep descriptions engaging and fun` : ""}
+- Keep descriptions engaging and fun`
+		: ""
+}
 
 TOPIC: ${topic}
 LOCATION: ${locationName}
@@ -665,9 +752,15 @@ Generate the viral content now - ONLY the content, nothing else:`;
 };
 
 // Enhanced viral score calculation with context bonus
-const calculateEnhancedViralScore = (content, platform, trendAnalysis, contextData) => {
+const calculateEnhancedViralScore = (
+	content,
+	platform,
+	trendAnalysis,
+	contextData
+) => {
 	let score = 50;
-	const platformConfig = PLATFORM_CONFIGS[platform] || PLATFORM_CONFIGS.twitter;
+	const platformConfig =
+		PLATFORM_CONFIGS[platform] || PLATFORM_CONFIGS.twitter;
 
 	// Content length optimization
 	const contentLength = content.length;
@@ -680,19 +773,42 @@ const calculateEnhancedViralScore = (content, platform, trendAnalysis, contextDa
 	}
 
 	// Viral indicators
-	const viralWords = ['secret', 'truth', 'shocking', 'unbelievable', 'amazing', 'incredible', 'mind-blowing'];
-	const emotionalWords = ['love', 'hate', 'excited', 'angry', 'surprised', 'happy', 'sad'];
-	const urgencyWords = ['now', 'today', 'breaking', 'just', 'immediately', 'urgent'];
+	const viralWords = [
+		"secret",
+		"truth",
+		"shocking",
+		"unbelievable",
+		"amazing",
+		"incredible",
+		"mind-blowing",
+	];
+	const emotionalWords = [
+		"love",
+		"hate",
+		"excited",
+		"angry",
+		"surprised",
+		"happy",
+		"sad",
+	];
+	const urgencyWords = [
+		"now",
+		"today",
+		"breaking",
+		"just",
+		"immediately",
+		"urgent",
+	];
 
-	viralWords.forEach(word => {
+	viralWords.forEach((word) => {
 		if (content.toLowerCase().includes(word)) score += 3;
 	});
 
-	emotionalWords.forEach(word => {
+	emotionalWords.forEach((word) => {
 		if (content.toLowerCase().includes(word)) score += 2;
 	});
 
-	urgencyWords.forEach(word => {
+	urgencyWords.forEach((word) => {
 		if (content.toLowerCase().includes(word)) score += 2;
 	});
 
@@ -704,7 +820,8 @@ const calculateEnhancedViralScore = (content, platform, trendAnalysis, contextDa
 			if (content.match(/\b(thread|🧵)\b/gi)) score += 5;
 			break;
 		case "linkedin":
-			if (content.match(/\b(insight|experience|professional|career)\b/gi)) score += 8;
+			if (content.match(/\b(insight|experience|professional|career)\b/gi))
+				score += 8;
 			if (content.includes("?")) score += 6;
 			if (content.match(/\b(tips|advice|lessons)\b/gi)) score += 10;
 			break;
@@ -714,7 +831,8 @@ const calculateEnhancedViralScore = (content, platform, trendAnalysis, contextDa
 			if (content.match(/\b(save|share|tag)\b/gi)) score += 6;
 			break;
 		case "facebook":
-			if (content.match(/\b(share|community|family|friends)\b/gi)) score += 8;
+			if (content.match(/\b(share|community|family|friends)\b/gi))
+				score += 8;
 			if (content.includes("?")) score += 7;
 			break;
 		case "tiktok":
@@ -733,7 +851,7 @@ const calculateEnhancedViralScore = (content, platform, trendAnalysis, contextDa
 	// Context bonus - if we have real-world context, boost the score
 	if (contextData && contextData.sources && contextData.sources.length > 0) {
 		score += 10; // Bonus for having real-world context
-		console.log('Applied context bonus: +10 points');
+		console.log("Applied context bonus: +10 points");
 	}
 
 	// Trend analysis bonus
@@ -799,31 +917,40 @@ const generatePlatformRecommendations = (platform, topic, viralScore) => {
 		case "twitter":
 			return {
 				...baseRecommendations,
-				threadSuggestion: "Consider creating a thread for more detailed insights",
-				visualTip: "Add an eye-catching image or GIF to increase engagement by 150%",
+				threadSuggestion:
+					"Consider creating a thread for more detailed insights",
+				visualTip:
+					"Add an eye-catching image or GIF to increase engagement by 150%",
 			};
 		case "linkedin":
 			return {
 				...baseRecommendations,
-				networkingTip: "Tag relevant industry professionals to increase reach",
-				professionalTip: "Share a personal experience to make it more relatable",
+				networkingTip:
+					"Tag relevant industry professionals to increase reach",
+				professionalTip:
+					"Share a personal experience to make it more relatable",
 			};
 		case "instagram":
 			return {
 				...baseRecommendations,
-				visualTip: "High-quality visuals are essential - consider professional photography",
-				storyTip: "Share behind-the-scenes content in Stories for authenticity",
+				visualTip:
+					"High-quality visuals are essential - consider professional photography",
+				storyTip:
+					"Share behind-the-scenes content in Stories for authenticity",
 			};
 		case "facebook":
 			return {
 				...baseRecommendations,
-				communityTip: "Post in relevant Facebook Groups to expand reach",
-				engagementTip: "Ask questions to encourage comments and discussions",
+				communityTip:
+					"Post in relevant Facebook Groups to expand reach",
+				engagementTip:
+					"Ask questions to encourage comments and discussions",
 			};
 		case "tiktok":
 			return {
 				...baseRecommendations,
-				videoTip: "Hook viewers in the first 3 seconds with a compelling opening",
+				videoTip:
+					"Hook viewers in the first 3 seconds with a compelling opening",
 				trendTip: "Use trending sounds to increase discoverability",
 			};
 		default:
@@ -833,22 +960,75 @@ const generatePlatformRecommendations = (platform, topic, viralScore) => {
 
 const getVisualSuggestions = (platform) => {
 	const suggestions = {
-		twitter: ["Eye-catching images", "GIFs", "Charts/infographics", "Short videos"],
-		linkedin: ["Professional headshots", "Industry infographics", "Behind-the-scenes", "Carousel posts"],
-		instagram: ["High-quality photos", "Consistent filters", "Carousel posts", "Reels", "Stories"],
-		facebook: ["Engaging images", "User-generated content", "Facebook Live", "Event photos"],
-		tiktok: ["Vertical videos (9:16)", "Trending effects", "Text overlays", "Quick cuts"],
+		twitter: [
+			"Eye-catching images",
+			"GIFs",
+			"Charts/infographics",
+			"Short videos",
+		],
+		linkedin: [
+			"Professional headshots",
+			"Industry infographics",
+			"Behind-the-scenes",
+			"Carousel posts",
+		],
+		instagram: [
+			"High-quality photos",
+			"Consistent filters",
+			"Carousel posts",
+			"Reels",
+			"Stories",
+		],
+		facebook: [
+			"Engaging images",
+			"User-generated content",
+			"Facebook Live",
+			"Event photos",
+		],
+		tiktok: [
+			"Vertical videos (9:16)",
+			"Trending effects",
+			"Text overlays",
+			"Quick cuts",
+		],
 	};
 	return suggestions[platform] || suggestions.twitter;
 };
 
 const getCTASuggestions = (platform) => {
 	const ctas = {
-		twitter: ["Retweet if you agree", "What's your take?", "Share your thoughts 👇", "Tag someone who needs this"],
-		linkedin: ["Share your experience", "Connect for more insights", "What's your take on this?", "Follow for updates"],
-		instagram: ["Link in bio", "Double tap if you agree ❤️", "Save for later", "Tag a friend", "Share to Stories"],
-		facebook: ["Share if you agree", "Join our community", "What do you think?", "Like and share"],
-		tiktok: ["Duet this", "Try this challenge", "Follow for more", "Which one are you?", "Comment below"],
+		twitter: [
+			"Retweet if you agree",
+			"What's your take?",
+			"Share your thoughts 👇",
+			"Tag someone who needs this",
+		],
+		linkedin: [
+			"Share your experience",
+			"Connect for more insights",
+			"What's your take on this?",
+			"Follow for updates",
+		],
+		instagram: [
+			"Link in bio",
+			"Double tap if you agree ❤️",
+			"Save for later",
+			"Tag a friend",
+			"Share to Stories",
+		],
+		facebook: [
+			"Share if you agree",
+			"Join our community",
+			"What do you think?",
+			"Like and share",
+		],
+		tiktok: [
+			"Duet this",
+			"Try this challenge",
+			"Follow for more",
+			"Which one are you?",
+			"Comment below",
+		],
 	};
 	return ctas[platform] || ctas.twitter;
 };
@@ -879,12 +1059,21 @@ const generateFallbackContent = (topic, platform, tone, platformConfig) => {
 	const cta = ctas[Math.floor(Math.random() * ctas.length)];
 	content += ` ${cta}`;
 
-	const hashtagPool = [`#${topic.replace(/\s+/g, "")}`, "#Innovation", "#TechTrends", "#DigitalTransformation"];
-	const selectedHashtags = hashtagPool.slice(0, platformConfig.optimalHashtags);
+	const hashtagPool = [
+		`#${topic.replace(/\s+/g, "")}`,
+		"#Innovation",
+		"#TechTrends",
+		"#DigitalTransformation",
+	];
+	const selectedHashtags = hashtagPool.slice(
+		0,
+		platformConfig.optimalHashtags
+	);
 	content += ` ${selectedHashtags.join(" ")}`;
 
 	if (content.length > platformConfig.maxCharacters) {
-		content = content.substring(0, platformConfig.maxCharacters - 3) + "...";
+		content =
+			content.substring(0, platformConfig.maxCharacters - 3) + "...";
 	}
 
 	const viralScore = Math.floor(Math.random() * 30) + 70;
@@ -894,7 +1083,11 @@ const generateFallbackContent = (topic, platform, tone, platformConfig) => {
 		viralScore,
 		hashtags: selectedHashtags,
 		platform,
-		recommendations: generatePlatformRecommendations(platform, topic, viralScore),
+		recommendations: generatePlatformRecommendations(
+			platform,
+			topic,
+			viralScore
+		),
 		platformOptimization: {
 			characterCount: content.length,
 			characterLimit: platformConfig.maxCharacters,
@@ -918,73 +1111,6 @@ const getBestPostTime = (platform) => {
 	return times[platform] || "14:00-16:00 UTC";
 };
 
-// Posting Streak Data Store
-let userStreaks = new Map();
-
-// Initialize streak data for a user
-const initializeUserStreak = (userId) => {
-	if (!userStreaks.has(userId)) {
-		const today = new Date();
-		const streakData = [];
-		
-		// Generate last 30 days of data
-		for (let i = 29; i >= 0; i--) {
-			const date = new Date(today);
-			date.setDate(date.getDate() - i);
-			streakData.push({
-				date: date.toISOString().split('T')[0],
-				posted: Math.random() > 0.7, // 30% chance of posting
-				postCount: Math.random() > 0.7 ? Math.floor(Math.random() * 3) + 1 : 0
-			});
-		}
-		
-		userStreaks.set(userId, {
-			currentStreak: calculateCurrentStreak(streakData),
-			longestStreak: calculateLongestStreak(streakData),
-			lastPostDate: getLastPostDate(streakData),
-			streakData
-		});
-	}
-	return userStreaks.get(userId);
-};
-
-const calculateCurrentStreak = (streakData) => {
-	let streak = 0;
-	for (let i = streakData.length - 1; i >= 0; i--) {
-		if (streakData[i].posted) {
-			streak++;
-		} else {
-			break;
-		}
-	}
-	return streak;
-};
-
-const calculateLongestStreak = (streakData) => {
-	let maxStreak = 0;
-	let currentStreak = 0;
-	
-	for (const day of streakData) {
-		if (day.posted) {
-			currentStreak++;
-			maxStreak = Math.max(maxStreak, currentStreak);
-		} else {
-			currentStreak = 0;
-		}
-	}
-	
-	return maxStreak;
-};
-
-const getLastPostDate = (streakData) => {
-	for (let i = streakData.length - 1; i >= 0; i--) {
-		if (streakData[i].posted) {
-			return streakData[i].date;
-		}
-	}
-	return null;
-};
-
 // Auth Middleware
 const authenticateToken = (req, res, next) => {
 	const authHeader = req.headers["authorization"];
@@ -1002,25 +1128,53 @@ app.get("/api/health", (req, res) => {
 	res.json({ status: "OK", message: "TrendCraft API is running" });
 });
 
-// Auth Routes
+// Email/password login using Supabase
 app.post("/api/auth/login", async (req, res) => {
 	const { email, password } = req.body;
-	const user = users.find((u) => u.email === email);
-	if (!user || !bcrypt.compareSync(password, user.password)) {
-		return res.status(401).json({ error: "Invalid credentials" });
-	}
-	const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, {
-		expiresIn: "24h",
+	const { data, error } = await supabase.auth.signInWithPassword({
+		email,
+		password,
 	});
+	if (error) return res.status(401).json({ error: error.message });
+	// Fetch user profile
+	const { data: userProfile, error: userError } = await supabase
+		.from("users")
+		.select("*")
+		.eq("id", data.user.id)
+		.single();
+	if (userError) return res.status(500).json({ error: userError.message });
+	res.json({ token: data.session.access_token, user: userProfile });
+});
+
+// Registration using Supabase
+app.post("/api/auth/register", async (req, res) => {
+	const { username, email, password } = req.body;
+	const { data, error } = await supabase.auth.signUp({
+		email,
+		password,
+		options: { data: { username } },
+	});
+	if (error) return res.status(400).json({ error: error.message });
+	// Create user profile in 'users' table
+	await supabase
+		.from("users")
+		.insert([{ id: data.user.id, email, username }]);
 	res.json({
-		token,
-		user: {
-			id: user.id,
-			username: user.username,
-			email: user.email,
-			profile: user.profile,
-		},
+		token: data.session?.access_token,
+		user: { id: data.user.id, email, username },
 	});
+});
+
+// Social OAuth login (Google, Twitter, Facebook)
+app.get("/api/auth/oauth/:provider", async (req, res) => {
+	const { provider } = req.params;
+	const redirectTo = req.query.redirectTo || "http://localhost:5173";
+	const { data, error } = await supabase.auth.signInWithOAuth({
+		provider,
+		options: { redirectTo },
+	});
+	if (error) return res.status(400).json({ error: error.message });
+	res.redirect(data.url);
 });
 
 // Enhanced Trends Routes with RapidAPI and location support
@@ -1028,21 +1182,27 @@ app.get("/api/trends", authenticateToken, async (req, res) => {
 	try {
 		const { platform = "twitter", limit = 20, location = "1" } = req.query;
 
-		console.log(`API: Fetching REAL trends for platform: ${platform}, location: ${location}, limit: ${limit}`);
+		console.log(
+			`API: Fetching REAL trends for platform: ${platform}, location: ${location}, limit: ${limit}`
+		);
 
 		// Fetch ONLY real data from RapidAPI for Twitter, empty for others
 		let trends = await fetchTrendsFromRapidAPI(platform, location);
 
 		// If no real data available, return empty array
 		if (!trends || trends.length === 0) {
-			console.log(`No real trends data available for ${platform} - returning empty array`);
+			console.log(
+				`No real trends data available for ${platform} - returning empty array`
+			);
 			return res.json([]);
 		}
 
 		// Limit results
 		const limitedTrends = trends.slice(0, parseInt(limit));
 
-		console.log(`API: Returning ${limitedTrends.length} REAL trends for ${platform}`);
+		console.log(
+			`API: Returning ${limitedTrends.length} REAL trends for ${platform}`
+		);
 		res.json(limitedTrends);
 	} catch (error) {
 		console.error("Error in /api/trends:", error);
@@ -1057,7 +1217,15 @@ app.get("/api/trends/locations", authenticateToken, (req, res) => {
 
 // Enhanced Content Routes with three-step AI generation and location context
 app.post("/api/content/generate", authenticateToken, async (req, res) => {
-	const { topic, platform, tone, includeHashtags, targetAudience, isAnalysisOnly, locationWoeid } = req.body;
+	const {
+		topic,
+		platform,
+		tone,
+		includeHashtags,
+		targetAudience,
+		isAnalysisOnly,
+		locationWoeid,
+	} = req.body;
 	const generatedContent = await generateContentWithAI(
 		topic,
 		platform,
@@ -1114,95 +1282,196 @@ app.post("/api/voice/speech-to-text", authenticateToken, async (req, res) => {
 });
 
 // Posts Routes
-app.get("/api/posts", authenticateToken, (req, res) => {
-	const userPosts = posts.filter((p) => p.userId === req.user.id);
-	res.json(userPosts.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)));
+app.get("/api/posts", authenticateToken, async (req, res) => {
+	const { data, error } = await supabase
+		.from("posts")
+		.select("*")
+		.eq("user_id", req.user.id)
+		.order("created_at", { ascending: false });
+	if (error) return res.status(500).json({ error: error.message });
+	res.json(data);
+});
+
+app.post("/api/posts", authenticateToken, async (req, res) => {
+	const post = { ...req.body, user_id: req.user.id };
+	const { data, error } = await supabase
+		.from("posts")
+		.insert([post])
+		.select("*")
+		.single();
+	if (error) return res.status(500).json({ error: error.message });
+	res.json(data);
+});
+
+app.put("/api/posts/:id", authenticateToken, async (req, res) => {
+	const { id } = req.params;
+	const { data, error } = await supabase
+		.from("posts")
+		.update(req.body)
+		.eq("id", id)
+		.eq("user_id", req.user.id)
+		.select("*")
+		.single();
+	if (error) return res.status(500).json({ error: error.message });
+	res.json(data);
+});
+
+app.delete("/api/posts/:id", authenticateToken, async (req, res) => {
+	const { id } = req.params;
+	const { error } = await supabase
+		.from("posts")
+		.delete()
+		.eq("id", id)
+		.eq("user_id", req.user.id);
+	if (error) return res.status(500).json({ error: error.message });
+	res.json({ success: true });
 });
 
 // Analytics Routes
-app.get("/api/analytics/overview", authenticateToken, (req, res) => {
-	const userPosts = posts.filter((p) => p.userId === req.user.id);
-	const totalEngagement = userPosts.reduce(
-		(sum, post) => sum + post.engagement.likes + post.engagement.retweets + post.engagement.comments,
+app.get("/api/analytics/overview", authenticateToken, async (req, res) => {
+	const { data: posts, error } = await supabase
+		.from("posts")
+		.select("*")
+		.eq("user_id", req.user.id);
+	if (error) return res.status(500).json({ error: error.message });
+	const totalEngagement = posts.reduce(
+		(sum, post) =>
+			sum +
+			(post.engagement?.likes || 0) +
+			(post.engagement?.retweets || 0) +
+			(post.engagement?.comments || 0),
 		0
 	);
-	const totalImpressions = userPosts.reduce((sum, post) => sum + (post.performance?.impressions || 0), 0);
+	const totalImpressions = posts.reduce(
+		(sum, post) => sum + (post.performance?.impressions || 0),
+		0
+	);
 	const avgViralScore =
-		userPosts.length > 0
-			? userPosts.reduce((sum, post) => sum + post.viralScore, 0) / userPosts.length
+		posts.length > 0
+			? posts.reduce((sum, post) => sum + (post.viral_score || 0), 0) /
+			  posts.length
 			: 0;
 	res.json({
-		totalPosts: userPosts.length,
+		totalPosts: posts.length,
 		totalEngagement,
 		totalImpressions,
 		avgViralScore: Math.round(avgViralScore),
 		weeklyGrowth: "+12.5%",
-		topPerformingPost: userPosts.sort((a, b) => b.viralScore - a.viralScore)[0] || null,
+		topPerformingPost:
+			posts.sort(
+				(a, b) => (b.viral_score || 0) - (a.viral_score || 0)
+			)[0] || null,
 	});
 });
 
-app.get("/api/analytics/performance", authenticateToken, (req, res) => {
-	const performanceData = [];
-	const today = new Date();
-
-	for (let i = 29; i >= 0; i--) {
-		const date = new Date(today);
-		date.setDate(date.getDate() - i);
-
-		performanceData.push({
-			date: date.toISOString().split("T")[0],
-			impressions: Math.floor(Math.random() * 5000) + 1000,
-			engagement: Math.floor(Math.random() * 500) + 100,
-			clicks: Math.floor(Math.random() * 200) + 50,
-			reach: Math.floor(Math.random() * 3000) + 800,
-		});
-	}
-
-	res.json(performanceData);
+app.get("/api/analytics/performance", authenticateToken, async (req, res) => {
+	const { data: analytics, error } = await supabase
+		.from("post_analytics")
+		.select("*")
+		.eq("user_id", req.user.id)
+		.order("date", { ascending: true });
+	if (error) return res.status(500).json({ error: error.message });
+	res.json(analytics);
 });
 
 // User Streak Routes
-app.get("/api/user/streak", authenticateToken, (req, res) => {
-	const streakData = initializeUserStreak(req.user.id);
-	res.json(streakData);
+app.get("/api/user/streak", authenticateToken, async (req, res) => {
+	// Fetch streak data for the user from user_streaks table
+	const { data: streakRows, error } = await supabase
+		.from("user_streaks")
+		.select("*")
+		.eq("user_id", req.user.id)
+		.order("date", { ascending: true });
+	if (error) return res.status(500).json({ error: error.message });
+	// Calculate streaks
+	let currentStreak = 0,
+		longestStreak = 0,
+		lastPostDate = null;
+	let tempStreak = 0;
+	for (let i = 0; i < streakRows.length; i++) {
+		if (streakRows[i].posted) {
+			tempStreak++;
+			if (tempStreak > longestStreak) longestStreak = tempStreak;
+			lastPostDate = streakRows[i].date;
+		} else {
+			tempStreak = 0;
+		}
+	}
+	currentStreak = tempStreak;
+	res.json({
+		currentStreak,
+		longestStreak,
+		lastPostDate,
+		streakData: streakRows,
+	});
 });
 
-app.post("/api/user/streak/update", authenticateToken, (req, res) => {
-	const userId = req.user.id;
-	const streakData = initializeUserStreak(userId);
-	
-	// Mark today as posted
-	const today = new Date().toISOString().split('T')[0];
-	const todayData = streakData.streakData.find(d => d.date === today);
-	
-	if (todayData) {
-		todayData.posted = true;
-		todayData.postCount += 1;
-	} else {
-		// Add today's data if not exists
-		streakData.streakData.push({
-			date: today,
-			posted: true,
-			postCount: 1
-		});
+app.post("/api/user/streak/update", authenticateToken, async (req, res) => {
+	const today = new Date().toISOString().split("T")[0];
+	// Upsert today's streak row
+	const { error } = await supabase
+		.from("user_streaks")
+		.upsert(
+			{ user_id: req.user.id, date: today, posted: true, post_count: 1 },
+			{ onConflict: ["user_id", "date"] }
+		);
+	if (error) return res.status(500).json({ error: error.message });
+	// Return updated streak data
+	const { data: streakRows } = await supabase
+		.from("user_streaks")
+		.select("*")
+		.eq("user_id", req.user.id)
+		.order("date", { ascending: true });
+	// Calculate streaks
+	let currentStreak = 0,
+		longestStreak = 0,
+		lastPostDate = null;
+	let tempStreak = 0;
+	for (let i = 0; i < streakRows.length; i++) {
+		if (streakRows[i].posted) {
+			tempStreak++;
+			if (tempStreak > longestStreak) longestStreak = tempStreak;
+			lastPostDate = streakRows[i].date;
+		} else {
+			tempStreak = 0;
+		}
 	}
-	
-	// Recalculate streaks
-	streakData.currentStreak = calculateCurrentStreak(streakData.streakData);
-	streakData.longestStreak = calculateLongestStreak(streakData.streakData);
-	streakData.lastPostDate = today;
-	
-	userStreaks.set(userId, streakData);
-	res.json(streakData);
+	currentStreak = tempStreak;
+	res.json({
+		currentStreak,
+		longestStreak,
+		lastPostDate,
+		streakData: streakRows,
+	});
 });
 
 // Start server
 app.listen(PORT, () => {
 	console.log(`🚀 TrendCraft API server running on http://localhost:${PORT}`);
 	console.log(`🎯 Frontend should run on: http://localhost:5173`);
-	console.log(`🤖 Gemini AI: ${process.env.GEMINI_API_KEY ? "Configured" : "Not configured"}`);
-	console.log(`🕷️ RapidAPI: ${process.env.X_RapidAPI_Key ? "Configured - REAL DATA ONLY" : "Not configured - NO FALLBACKS"}`);
-	console.log(`🔍 Firecrawl: ${process.env.FIRECRAWL_API_KEY ? "Configured - ENHANCED CONTEXT" : "Not configured"}`);
-	console.log(`🎤 ElevenLabs: ${process.env.ELEVENLABS_API_KEY ? "Configured" : "Not configured"}`);
+	console.log(
+		`🤖 Gemini AI: ${
+			process.env.GEMINI_API_KEY ? "Configured" : "Not configured"
+		}`
+	);
+	console.log(
+		`🕷️ RapidAPI: ${
+			process.env.X_RapidAPI_Key
+				? "Configured - REAL DATA ONLY"
+				: "Not configured - NO FALLBACKS"
+		}`
+	);
+	console.log(
+		`🔍 Firecrawl: ${
+			process.env.FIRECRAWL_API_KEY
+				? "Configured - ENHANCED CONTEXT"
+				: "Not configured"
+		}`
+	);
+	console.log(
+		`🎤 ElevenLabs: ${
+			process.env.ELEVENLABS_API_KEY ? "Configured" : "Not configured"
+		}`
+	);
 	console.log("✅ Server started successfully!");
 });
