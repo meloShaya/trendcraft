@@ -1,27 +1,31 @@
 /*
-  # Complete TrendCraft Database Schema
+  # Complete TrendCraft Database Schema (Fixed)
+
+  This schema has been corrected to resolve the "generation expression is not immutable" error.
+  The fix involves explicitly setting the timezone to 'UTC' when generating the `collection_date`
+  column in the `post_analytics` table.
 
   1. New Tables
-    - `users` - Core user accounts with profile information
-    - `user_social_accounts` - Connected social media accounts for publishing
-    - `user_auth_providers` - Social authentication providers used by users
-    - `trends` - Cached trending topics from various platforms
-    - `trend_contexts` - Firecrawl search context data for trends
-    - `posts` - User-generated content posts
-    - `post_analytics` - Performance metrics for published posts
-    - `user_streaks` - Daily posting streak tracking
-    - `user_settings` - User preferences and notification settings
-    - `api_usage_logs` - API usage tracking for rate limiting and billing
+     - `users` - Core user accounts with profile information
+     - `user_social_accounts` - Connected social media accounts for publishing
+     - `user_auth_providers` - Social authentication providers used by users
+     - `trends` - Cached trending topics from various platforms
+     - `trend_contexts` - Firecrawl search context data for trends
+     - `posts` - User-generated content posts
+     - `post_analytics` - Performance metrics for published posts
+     - `user_streaks` - Daily posting streak tracking
+     - `user_settings` - User preferences and notification settings
+     - `api_usage_logs` - API usage tracking for rate limiting and billing
 
   2. Security
-    - Enable RLS on all tables
-    - Add policies for user data access
-    - Service role policies for system operations
+     - Enable RLS on all tables
+     - Add policies for user data access
+     - Service role policies for system operations
 
   3. Performance
-    - Strategic indexes for common queries
-    - Automatic cleanup functions for expired data
-    - Analytics views for dashboard insights
+     - Strategic indexes for common queries
+     - Automatic cleanup functions for expired data
+     - Analytics views for dashboard insights
 */
 
 -- Enable necessary extensions
@@ -261,12 +265,13 @@ CREATE TABLE IF NOT EXISTS post_analytics (
   
   -- Data collection timestamp
   collected_at timestamptz DEFAULT now(),
-  collection_date date GENERATED ALWAYS AS (collected_at::date) STORED,
+  -- CORRECTED: Explicitly cast to date at a fixed timezone ('utc') to ensure immutability.
+  collection_date date GENERATED ALWAYS AS (CAST(timezone('utc', collected_at) AS date)) STORED,
   created_at timestamptz DEFAULT now()
 );
 
 -- Add unique constraint using the generated column
-ALTER TABLE post_analytics ADD CONSTRAINT unique_post_analytics_daily 
+ALTER TABLE post_analytics ADD CONSTRAINT unique_post_analytics_daily  
   UNIQUE(post_id, platform, collection_date);
 
 -- Enable RLS
@@ -422,7 +427,7 @@ CREATE TRIGGER update_posts_updated_at BEFORE UPDATE ON posts
 CREATE TRIGGER update_user_settings_updated_at BEFORE UPDATE ON user_settings
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
--- Function to clean up expired trends and contexts
+-- Function to clean up expired data
 CREATE OR REPLACE FUNCTION cleanup_expired_data()
 RETURNS void AS $$
 BEGIN
