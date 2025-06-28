@@ -55,7 +55,121 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 			setUser(JSON.parse(savedUser));
 		}
 		setLoading(false);
+
+		// Listen for auth state changes
+		const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+			if (event === 'SIGNED_IN' && session) {
+				// Handle social login success
+				try {
+					// Check if user exists in our users table
+					const { data: existingUser, error: fetchError } = await supabase
+						.from('users')
+						.select('*')
+						.eq('id', session.user.id)
+						.single();
+
+					if (fetchError && fetchError.code === 'PGRST116') {
+						// User doesn't exist, create them
+						const { data: newUser, error: createError } = await supabase
+							.from('users')
+							.insert({
+								id: session.user.id,
+								email: session.user.email,
+								username: session.user.user_metadata?.username || 
+									session.user.user_metadata?.preferred_username || 
+									session.user.email?.split('@')[0] || 'user',
+								full_name: session.user.user_metadata?.full_name || 
+									session.user.user_metadata?.name || null,
+								avatar_url: session.user.user_metadata?.avatar_url || 
+									session.user.user_metadata?.picture || null,
+								bio: null
+							})
+							.select()
+							.single();
+
+						if (!createError && newUser) {
+							setUser(newUser);
+							localStorage.setItem("user", JSON.stringify(newUser));
+							
+							// Auto-connect social account
+							await autoConnectSocialAccount(session, newUser.id);
+						}
+					} else if (!fetchError && existingUser) {
+						// User exists, update their info
+						const { data: updatedUser } = await supabase
+							.from('users')
+							.update({
+								full_name: session.user.user_metadata?.full_name || 
+									session.user.user_metadata?.name || existingUser.full_name,
+								avatar_url: session.user.user_metadata?.avatar_url || 
+									session.user.user_metadata?.picture || existingUser.avatar_url,
+								last_login_at: new Date().toISOString()
+							})
+							.eq('id', session.user.id)
+							.select()
+							.single();
+
+						if (updatedUser) {
+							setUser(updatedUser);
+							localStorage.setItem("user", JSON.stringify(updatedUser));
+							
+							// Auto-connect social account if not already connected
+							await autoConnectSocialAccount(session, updatedUser.id);
+						}
+					}
+
+					setToken(session.access_token);
+					localStorage.setItem("token", session.access_token);
+				} catch (error) {
+					console.error('Error handling social login:', error);
+				}
+			} else if (event === 'SIGNED_OUT') {
+				setUser(null);
+				setToken(null);
+				localStorage.removeItem("token");
+				localStorage.removeItem("user");
+			}
+		});
+
+		return () => subscription.unsubscribe();
 	}, []);
+
+	const autoConnectSocialAccount = async (session: any, userId: string) => {
+		try {
+			const provider = session.user.app_metadata?.provider;
+			if (!provider || provider === 'email') return;
+
+			// Check if social account is already connected
+			const { data: existingAccount } = await supabase
+				.from('user_social_accounts')
+				.select('*')
+				.eq('user_id', userId)
+				.eq('platform', provider === 'google' ? 'google' : provider)
+				.single();
+
+			if (!existingAccount) {
+				// Connect the social account
+				await supabase
+					.from('user_social_accounts')
+					.insert({
+						user_id: userId,
+						platform: provider === 'google' ? 'google' : provider,
+						platform_user_id: session.user.id,
+						platform_username: session.user.user_metadata?.preferred_username || 
+							session.user.user_metadata?.username || 
+							session.user.email?.split('@')[0] || 'user',
+						platform_display_name: session.user.user_metadata?.full_name || 
+							session.user.user_metadata?.name || null,
+						access_token: session.access_token,
+						refresh_token: session.refresh_token,
+						is_connected: true,
+						last_sync_at: new Date().toISOString()
+					});
+			}
+		} catch (error) {
+			console.error('Error auto-connecting social account:', error);
+		}
+	};
 
 	const login = async (email: string, password: string) => {
 		const { data, error } = await supabase.auth.signInWithPassword({
@@ -164,7 +278,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 	};
 
 	const socialLogin = async (provider: "google" | "twitter" | "facebook") => {
-		const { error } = await supabase.auth.signInWithOAuth({ provider });
+		const { error } = await supabase.auth.signInWithOAuth({ 
+			provider,
+			options: {
+				redirectTo: `${window.location.origin}/dashboard`
+			}
+		});
 		if (error) throw new Error(error.message);
 	};
 

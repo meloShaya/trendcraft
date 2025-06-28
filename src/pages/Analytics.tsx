@@ -37,13 +37,37 @@ const Analytics: React.FC = () => {
           })
         ]);
 
-        const performanceData = await performanceRes.json();
-        const analyticsData = await overviewRes.json();
+        if (performanceRes.ok) {
+          const performanceData = await performanceRes.json();
+          // Ensure performanceData is an array
+          setPerformanceData(Array.isArray(performanceData) ? performanceData : []);
+        } else {
+          setPerformanceData([]);
+        }
 
-        setPerformanceData(performanceData);
-        setAnalytics(analyticsData);
+        if (overviewRes.ok) {
+          const analyticsData = await overviewRes.json();
+          setAnalytics(analyticsData);
+        } else {
+          setAnalytics({
+            totalPosts: 0,
+            totalEngagement: 0,
+            totalImpressions: 0,
+            avgViralScore: 0,
+            weeklyGrowth: '+0%'
+          });
+        }
       } catch (error) {
         console.error('Error fetching analytics:', error);
+        // Set default values on error
+        setPerformanceData([]);
+        setAnalytics({
+          totalPosts: 0,
+          totalEngagement: 0,
+          totalImpressions: 0,
+          avgViralScore: 0,
+          weeklyGrowth: '+0%'
+        });
       } finally {
         setLoading(false);
       }
@@ -64,7 +88,7 @@ const Analytics: React.FC = () => {
 
   const engagementData = performanceData.map(item => ({
     ...item,
-    engagementRate: ((item.engagement / item.impressions) * 100).toFixed(1)
+    engagementRate: item.impressions > 0 ? ((item.engagement / item.impressions) * 100).toFixed(1) : '0'
   }));
 
   return (
@@ -155,47 +179,57 @@ const Analytics: React.FC = () => {
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-4 sm:p-6">
           <h3 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-white mb-4">Performance Over Time</h3>
           <div className="h-64 sm:h-80">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={performanceData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                <XAxis 
-                  dataKey="date" 
-                  stroke="#6B7280"
-                  fontSize={12}
-                  tickFormatter={(value) => new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                />
-                <YAxis stroke="#6B7280" fontSize={12} />
-                <Tooltip 
-                  contentStyle={{ 
-                    backgroundColor: '#1F2937', 
-                    border: 'none', 
-                    borderRadius: '8px',
-                    color: '#F9FAFB'
-                  }}
-                />
-                <Line 
-                  type="monotone" 
-                  dataKey="impressions" 
-                  stroke="#3B82F6" 
-                  strokeWidth={2}
-                  name="Impressions"
-                />
-                <Line 
-                  type="monotone" 
-                  dataKey="engagement" 
-                  stroke="#10B981" 
-                  strokeWidth={2}
-                  name="Engagement"
-                />
-                <Line 
-                  type="monotone" 
-                  dataKey="clicks" 
-                  stroke="#8B5CF6" 
-                  strokeWidth={2}
-                  name="Clicks"
-                />
-              </LineChart>
-            </ResponsiveContainer>
+            {performanceData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={performanceData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                  <XAxis 
+                    dataKey="date" 
+                    stroke="#6B7280"
+                    fontSize={12}
+                    tickFormatter={(value) => new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                  />
+                  <YAxis stroke="#6B7280" fontSize={12} />
+                  <Tooltip 
+                    contentStyle={{ 
+                      backgroundColor: '#1F2937', 
+                      border: 'none', 
+                      borderRadius: '8px',
+                      color: '#F9FAFB'
+                    }}
+                  />
+                  <Line 
+                    type="monotone" 
+                    dataKey="impressions" 
+                    stroke="#3B82F6" 
+                    strokeWidth={2}
+                    name="Impressions"
+                  />
+                  <Line 
+                    type="monotone" 
+                    dataKey="engagement" 
+                    stroke="#10B981" 
+                    strokeWidth={2}
+                    name="Engagement"
+                  />
+                  <Line 
+                    type="monotone" 
+                    dataKey="clicks" 
+                    stroke="#8B5CF6" 
+                    strokeWidth={2}
+                    name="Clicks"
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex items-center justify-center h-full">
+                <div className="text-center">
+                  <BarChart3 className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                  <p className="text-gray-500 dark:text-gray-400">No performance data yet</p>
+                  <p className="text-sm text-gray-400 dark:text-gray-500">Start creating content to see your analytics</p>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -203,27 +237,37 @@ const Analytics: React.FC = () => {
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-4 sm:p-6">
           <h3 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-white mb-4">Daily Engagement</h3>
           <div className="h-64 sm:h-80">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={performanceData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                <XAxis 
-                  dataKey="date" 
-                  stroke="#6B7280"
-                  fontSize={12}
-                  tickFormatter={(value) => new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                />
-                <YAxis stroke="#6B7280" fontSize={12} />
-                <Tooltip 
-                  contentStyle={{ 
-                    backgroundColor: '#1F2937', 
-                    border: 'none', 
-                    borderRadius: '8px',
-                    color: '#F9FAFB'
-                  }}
-                />
-                <Bar dataKey="engagement" fill="#3B82F6" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+            {performanceData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={performanceData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                  <XAxis 
+                    dataKey="date" 
+                    stroke="#6B7280"
+                    fontSize={12}
+                    tickFormatter={(value) => new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                  />
+                  <YAxis stroke="#6B7280" fontSize={12} />
+                  <Tooltip 
+                    contentStyle={{ 
+                      backgroundColor: '#1F2937', 
+                      border: 'none', 
+                      borderRadius: '8px',
+                      color: '#F9FAFB'
+                    }}
+                  />
+                  <Bar dataKey="engagement" fill="#3B82F6" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex items-center justify-center h-full">
+                <div className="text-center">
+                  <BarChart3 className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                  <p className="text-gray-500 dark:text-gray-400">No engagement data yet</p>
+                  <p className="text-sm text-gray-400 dark:text-gray-500">Start creating content to see your analytics</p>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

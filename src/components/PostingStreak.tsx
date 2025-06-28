@@ -44,10 +44,28 @@ const PostingStreak: React.FC = () => {
 				const response = await fetch("/api/user/streak", {
 					headers: { Authorization: `Bearer ${token}` },
 				});
-				const data = await response.json();
-				setStreakData(data);
+				
+				if (response.ok) {
+					const data = await response.json();
+					setStreakData(data);
+				} else {
+					// Set default streak data if API fails
+					setStreakData({
+						currentStreak: 0,
+						longestStreak: 0,
+						lastPostDate: null,
+						streakData: []
+					});
+				}
 			} catch (error) {
 				console.error("Error fetching streak data:", error);
+				// Set default streak data on error
+				setStreakData({
+					currentStreak: 0,
+					longestStreak: 0,
+					lastPostDate: null,
+					streakData: []
+				});
 			} finally {
 				setLoading(false);
 			}
@@ -64,8 +82,11 @@ const PostingStreak: React.FC = () => {
 				method: "POST",
 				headers: { Authorization: `Bearer ${token}` },
 			});
-			const data = await response.json();
-			setStreakData(data);
+			
+			if (response.ok) {
+				const data = await response.json();
+				setStreakData(data);
+			}
 		} catch (error) {
 			console.error("Error updating streak:", error);
 		}
@@ -79,7 +100,7 @@ const PostingStreak: React.FC = () => {
 		);
 	}
 
-	if (!streakData || !Array.isArray(streakData.streakData)) {
+	if (!streakData) {
 		return (
 			<div className="text-center py-8">
 				<p className="text-gray-500 dark:text-gray-400">
@@ -88,6 +109,9 @@ const PostingStreak: React.FC = () => {
 			</div>
 		);
 	}
+
+	// Ensure streakData.streakData is an array
+	const streakDataArray = Array.isArray(streakData.streakData) ? streakData.streakData : [];
 
 	// Generate calendar days for the selected month
 	const monthStart = startOfMonth(selectedMonth);
@@ -100,7 +124,7 @@ const PostingStreak: React.FC = () => {
 	// Get posting data for a specific date
 	const getPostingData = (date: Date) => {
 		const dateStr = format(date, "yyyy-MM-dd");
-		return streakData.streakData.find((data) => data.date === dateStr);
+		return streakDataArray.find((data) => data.date === dateStr);
 	};
 
 	// Get intensity level for visualization
@@ -201,10 +225,7 @@ const PostingStreak: React.FC = () => {
 						<Target className="h-6 w-6 text-green-600 dark:text-green-400" />
 					</div>
 					<div className="text-2xl font-bold text-green-700 dark:text-green-300">
-						{Array.isArray(streakData.streakData)
-							? streakData.streakData.filter((d) => d.posted)
-									.length
-							: 0}
+						{streakDataArray.filter((d) => d.posted).length}
 					</div>
 					<div className="text-xs text-green-600 dark:text-green-400">
 						Days Posted
@@ -216,12 +237,7 @@ const PostingStreak: React.FC = () => {
 						<TrendingUp className="h-6 w-6 text-orange-600 dark:text-orange-400" />
 					</div>
 					<div className="text-2xl font-bold text-orange-700 dark:text-orange-300">
-						{Array.isArray(streakData.streakData)
-							? streakData.streakData.reduce(
-									(sum, d) => sum + d.postCount,
-									0
-							  )
-							: 0}
+						{streakDataArray.reduce((sum, d) => sum + d.postCount, 0)}
 					</div>
 					<div className="text-xs text-orange-600 dark:text-orange-400">
 						Total Posts
