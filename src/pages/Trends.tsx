@@ -25,7 +25,7 @@ interface Location {
 }
 
 const Trends: React.FC = () => {
-  const { token } = useAuth();
+  const { token, logout } = useAuth();
   const navigate = useNavigate();
   const [trends, setTrends] = useState<Trend[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
@@ -43,6 +43,11 @@ const Trends: React.FC = () => {
         const response = await fetch('/api/trends/locations', {
           headers: { Authorization: `Bearer ${token}` }
         });
+        
+        if (response.status === 401 || response.status === 403) {
+          logout();
+          return;
+        }
         
         if (response.ok) {
           const data = await response.json();
@@ -71,7 +76,7 @@ const Trends: React.FC = () => {
     if (token) {
       fetchLocations();
     }
-  }, [token]);
+  }, [token, logout]);
 
   useEffect(() => {
     const fetchTrends = async () => {
@@ -82,9 +87,7 @@ const Trends: React.FC = () => {
         });
         
         if (response.status === 401 || response.status === 403) {
-          // Don't logout automatically - just show error state
-          console.error('Authentication failed for trends');
-          setTrends([]);
+          logout();
           return;
         }
         
@@ -114,7 +117,7 @@ const Trends: React.FC = () => {
     if (token) {
       fetchTrends();
     }
-  }, [token, selectedPlatform, selectedLocation]);
+  }, [token, selectedPlatform, selectedLocation, logout]);
 
   const filteredTrends = trends.filter(trend =>
     trend.keyword.toLowerCase().includes(searchTerm.toLowerCase()) ||

@@ -27,7 +27,7 @@ interface Post {
 }
 
 const Posts: React.FC = () => {
-  const { token } = useAuth();
+  const { token, logout } = useAuth();
   const navigate = useNavigate();
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
@@ -39,10 +39,19 @@ const Posts: React.FC = () => {
         const response = await fetch('/api/posts', {
           headers: { Authorization: `Bearer ${token}` }
         });
+        
+        if (response.status === 401 || response.status === 403) {
+          logout();
+          return;
+        }
+        
         const data = await response.json();
-        setPosts(data);
+        // Ensure posts is always an array
+        setPosts(Array.isArray(data) ? data : []);
       } catch (error) {
         console.error('Error fetching posts:', error);
+        // Set empty array on error to prevent filter issues
+        setPosts([]);
       } finally {
         setLoading(false);
       }
@@ -51,7 +60,7 @@ const Posts: React.FC = () => {
     if (token) {
       fetchPosts();
     }
-  }, [token]);
+  }, [token, logout]);
 
   const deletePost = async (postId: number) => {
     if (!confirm('Are you sure you want to delete this post?')) return;
