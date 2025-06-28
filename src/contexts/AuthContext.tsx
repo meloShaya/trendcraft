@@ -39,6 +39,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 	const [loading, setLoading] = useState(true);
 
 	useEffect(() => {
+		let mounted = true;
+
 		// Check for existing session on app load
 		const initializeAuth = async () => {
 			try {
@@ -53,7 +55,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 				
 				if (testError) {
 					console.error('❌ [AUTH] Supabase connection failed:', testError);
-					throw new Error(`Database connection failed: ${testError.message}`);
+					if (mounted) {
+						setLoading(false);
+					}
+					return;
 				}
 				
 				console.log('✅ [AUTH] Supabase connection successful');
@@ -64,11 +69,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 				
 				if (error) {
 					console.error('❌ [AUTH] Error getting session:', error);
-					setLoading(false);
+					if (mounted) {
+						setLoading(false);
+					}
 					return;
 				}
 
-				if (session?.user) {
+				if (session?.user && mounted) {
 					console.log('✅ [AUTH] Found existing session for user:', session.user.id);
 					await handleUserSession(session);
 				} else {
@@ -76,10 +83,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 				}
 			} catch (error) {
 				console.error('❌ [AUTH] Critical error initializing auth:', error);
-				// Don't throw - just log and continue
 			} finally {
-				console.log('✅ [AUTH] Auth initialization complete, setting loading to false');
-				setLoading(false);
+				if (mounted) {
+					console.log('✅ [AUTH] Auth initialization complete, setting loading to false');
+					setLoading(false);
+				}
 			}
 		};
 
@@ -90,6 +98,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 		const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
 			console.log('🔄 [AUTH] Auth state changed:', event, session?.user?.id);
 			
+			if (!mounted) return;
+
 			try {
 				if (event === 'SIGNED_IN' && session) {
 					console.log('✅ [AUTH] User signed in:', session.user.id);
@@ -107,11 +117,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 				}
 			} catch (error) {
 				console.error('❌ [AUTH] Error in auth state change handler:', error);
-				setLoading(false);
+				if (mounted) {
+					setLoading(false);
+				}
 			}
 		});
 
 		return () => {
+			mounted = false;
 			console.log('🔄 [AUTH] Cleaning up auth listener');
 			subscription.unsubscribe();
 		};
@@ -375,10 +388,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 	);
 };
 
-export const useAuth = () => {
+// Fix the Fast Refresh issue by ensuring consistent exports
+function useAuth() {
 	const context = useContext(AuthContext);
 	if (context === undefined) {
 		throw new Error("useAuth must be used within an AuthProvider");
 	}
 	return context;
-};
+}
+
+export { useAuth };

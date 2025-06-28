@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Navigate } from "react-router-dom";
 import { Zap, Eye, EyeOff, Loader } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
@@ -22,6 +22,13 @@ const Login: React.FC = () => {
 		formLoading: loading,
 		isLogin 
 	});
+
+	// Add effect to handle navigation after successful auth
+	useEffect(() => {
+		if (user && !authLoading) {
+			console.log('✅ [LOGIN] User authenticated, should redirect to dashboard');
+		}
+	}, [user, authLoading]);
 
 	// Don't redirect if still loading auth state
 	if (authLoading) {
@@ -81,9 +88,9 @@ const Login: React.FC = () => {
 		} catch (err: any) {
 			console.error('❌ [LOGIN] Form submission error:', err);
 			setError(err.message || 'An error occurred. Please try again.');
-			setLoading(false); // Reset loading on error
+		} finally {
+			setLoading(false);
 		}
-		// Don't reset loading on success - let auth context handle it
 	};
 
 	const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -104,6 +111,7 @@ const Login: React.FC = () => {
 		} catch (err: any) {
 			console.error('❌ [LOGIN] Social login error:', err);
 			setError(err.message || 'Social login failed. Please try again.');
+		} finally {
 			setLoading(false);
 		}
 	};
