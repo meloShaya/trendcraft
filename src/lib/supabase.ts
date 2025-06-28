@@ -5,7 +5,8 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 console.log('🔄 [SUPABASE] Initializing client with:', {
 	url: supabaseUrl ? 'SET' : 'MISSING',
-	key: supabaseAnonKey ? 'SET' : 'MISSING'
+	key: supabaseAnonKey ? 'SET' : 'MISSING',
+	actualUrl: supabaseUrl // Show actual URL for debugging
 });
 
 if (!supabaseUrl || !supabaseAnonKey) {
@@ -16,12 +17,47 @@ if (!supabaseUrl || !supabaseAnonKey) {
 	throw new Error("Missing Supabase environment variables");
 }
 
+// Validate URL format
+try {
+	new URL(supabaseUrl);
+} catch (error) {
+	console.error('❌ [SUPABASE] Invalid Supabase URL format:', supabaseUrl);
+	throw new Error("Invalid Supabase URL format");
+}
+
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 	auth: {
 		autoRefreshToken: true,
 		persistSession: true,
-		detectSessionInUrl: true
+		detectSessionInUrl: true,
+		flowType: 'pkce'
+	},
+	global: {
+		headers: {
+			'X-Client-Info': 'trendcraft-web'
+		}
+	},
+	db: {
+		schema: 'public'
+	},
+	realtime: {
+		params: {
+			eventsPerSecond: 10
+		}
 	}
+});
+
+// Test connection on initialization
+supabase.from('users').select('count').limit(1).then(
+	({ data, error }) => {
+		if (error) {
+			console.error('❌ [SUPABASE] Connection test failed:', error);
+		} else {
+			console.log('✅ [SUPABASE] Connection test successful');
+		}
+	}
+).catch(error => {
+	console.error('❌ [SUPABASE] Connection test error:', error);
 });
 
 console.log('✅ [SUPABASE] Client initialized successfully');

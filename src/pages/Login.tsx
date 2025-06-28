@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Navigate } from "react-router-dom";
-import { Zap, Eye, EyeOff, Loader } from "lucide-react";
+import { Zap, Eye, EyeOff, Loader, AlertCircle, Wifi, WifiOff } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 
 const Login: React.FC = () => {
@@ -13,6 +13,7 @@ const Login: React.FC = () => {
 	});
 	const [error, setError] = useState("");
 	const [loading, setLoading] = useState(false);
+	const [connectionStatus, setConnectionStatus] = useState<'checking' | 'connected' | 'disconnected'>('checking');
 
 	const { user, login, register, socialLogin, loading: authLoading } = useAuth();
 
@@ -20,8 +21,32 @@ const Login: React.FC = () => {
 		authLoading, 
 		user: !!user, 
 		formLoading: loading,
-		isLogin 
+		isLogin,
+		connectionStatus
 	});
+
+	// Check connection status
+	useEffect(() => {
+		const checkConnection = async () => {
+			try {
+				// Simple connectivity check
+				const response = await fetch('https://www.google.com/favicon.ico', { 
+					mode: 'no-cors',
+					cache: 'no-cache'
+				});
+				setConnectionStatus('connected');
+			} catch (error) {
+				console.error('❌ [LOGIN] Connection check failed:', error);
+				setConnectionStatus('disconnected');
+			}
+		};
+
+		checkConnection();
+		
+		// Check connection every 30 seconds
+		const interval = setInterval(checkConnection, 30000);
+		return () => clearInterval(interval);
+	}, []);
 
 	// Add effect to handle navigation after successful auth
 	useEffect(() => {
@@ -53,6 +78,12 @@ const Login: React.FC = () => {
 		
 		console.log('🔄 [LOGIN] Form submitted:', { isLogin, email: formData.email });
 		
+		// Check connection first
+		if (connectionStatus === 'disconnected') {
+			setError("No internet connection. Please check your network and try again.");
+			return;
+		}
+		
 		// Validate form
 		if (!formData.email || !formData.password) {
 			const errorMsg = "Please fill in all required fields";
@@ -65,6 +96,19 @@ const Login: React.FC = () => {
 			const errorMsg = "Username is required for registration";
 			console.error('❌ [LOGIN] Validation error:', errorMsg);
 			setError(errorMsg);
+			return;
+		}
+		
+		// Validate email format
+		const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+		if (!emailRegex.test(formData.email)) {
+			setError("Please enter a valid email address");
+			return;
+		}
+		
+		// Validate password length
+		if (formData.password.length < 6) {
+			setError("Password must be at least 6 characters long");
 			return;
 		}
 		
@@ -87,7 +131,20 @@ const Login: React.FC = () => {
 			console.log('✅ [LOGIN] Form submission successful');
 		} catch (err: any) {
 			console.error('❌ [LOGIN] Form submission error:', err);
-			setError(err.message || 'An error occurred. Please try again.');
+			
+			// Provide user-friendly error messages
+			let errorMessage = err.message || 'An error occurred. Please try again.';
+			
+			if (errorMessage.includes('fetch') || errorMessage.includes('network') || errorMessage.includes('timeout')) {
+				errorMessage = 'Connection failed. Please check your internet connection and try again.';
+				setConnectionStatus('disconnected');
+			} else if (errorMessage.includes('Invalid login credentials')) {
+				errorMessage = 'Invalid email or password. Please check your credentials and try again.';
+			} else if (errorMessage.includes('already registered')) {
+				errorMessage = 'An account with this email already exists. Please try logging in instead.';
+			}
+			
+			setError(errorMessage);
 		} finally {
 			setLoading(false);
 		}
@@ -107,10 +164,23 @@ const Login: React.FC = () => {
 			setError("");
 			setLoading(true);
 			console.log('🔄 [LOGIN] Initiating social login with:', provider);
+			
+			// Check connection first
+			if (connectionStatus === 'disconnected') {
+				throw new Error("No internet connection. Please check your network and try again.");
+			}
+			
 			await socialLogin(provider);
 		} catch (err: any) {
 			console.error('❌ [LOGIN] Social login error:', err);
-			setError(err.message || 'Social login failed. Please try again.');
+			
+			let errorMessage = err.message || 'Social login failed. Please try again.';
+			if (errorMessage.includes('fetch') || errorMessage.includes('network')) {
+				errorMessage = 'Connection failed. Please check your internet connection and try again.';
+				setConnectionStatus('disconnected');
+			}
+			
+			setError(errorMessage);
 		} finally {
 			setLoading(false);
 		}
@@ -133,13 +203,35 @@ const Login: React.FC = () => {
 					<p className="text-gray-600 dark:text-gray-400 mt-2">
 						{isLogin ? "Welcome back" : "Create your account"}
 					</p>
+					
+					{/* Connection Status Indicator */}
+					<div className="flex items-center justify-center mt-3">
+						{connectionStatus === 'checking' && (
+							<div className="flex items-center text-yellow-600 dark:text-yellow-400">
+								<Loader className="h-4 w-4 animate-spin mr-2" />
+								<span className="text-sm">Checking connection...</span>
+							</div>
+						)}
+						{connectionStatus === 'connected' && (
+							<div className="flex items-center text-green-600 dark:text-green-400">
+								<Wifi className="h-4 w-4 mr-2" />
+								<span className="text-sm">Connected</span>
+							</div>
+						)}
+						{connectionStatus === 'disconnected' && (
+							<div className="flex items-center text-red-600 dark:text-red-400">
+								<WifiOff className="h-4 w-4 mr-2" />
+								<span className="text-sm">No connection</span>
+							</div>
+						)}
+					</div>
 				</div>
 
 				{/* Social Login Buttons */}
 				<div className="space-y-3 mb-6">
 					<button
 						onClick={() => handleSocialLogin("google")}
-						disabled={loading}
+						disabled={loading || connectionStatus === 'disconnected'}
 						className="w-full flex items-center justify-center gap-3 bg-white dark:bg-gray-700 border-2 border-gray-200 dark:border-gray-600 rounded-xl py-3 px-4 font-medium text-gray-700 dark:text-white shadow-sm hover:bg-gray-50 dark:hover:bg-gray-600 hover:border-gray-300 dark:hover:border-gray-500 transition-all duration-200 group disabled:opacity-50 disabled:cursor-not-allowed"
 					>
 						<div className="w-5 h-5 bg-white rounded-full flex items-center justify-center shadow-sm">
@@ -155,7 +247,7 @@ const Login: React.FC = () => {
 
 					<button
 						onClick={() => handleSocialLogin("twitter")}
-						disabled={loading}
+						disabled={loading || connectionStatus === 'disconnected'}
 						className="w-full flex items-center justify-center gap-3 bg-black hover:bg-gray-800 border-2 border-black rounded-xl py-3 px-4 font-medium text-white shadow-sm transition-all duration-200 group disabled:opacity-50 disabled:cursor-not-allowed"
 					>
 						<div className="w-5 h-5 flex items-center justify-center">
@@ -168,7 +260,7 @@ const Login: React.FC = () => {
 
 					<button
 						onClick={() => handleSocialLogin("facebook")}
-						disabled={loading}
+						disabled={loading || connectionStatus === 'disconnected'}
 						className="w-full flex items-center justify-center gap-3 bg-[#1877F2] hover:bg-[#166FE5] border-2 border-[#1877F2] rounded-xl py-3 px-4 font-medium text-white shadow-sm transition-all duration-200 group disabled:opacity-50 disabled:cursor-not-allowed"
 					>
 						<div className="w-5 h-5 flex items-center justify-center">
@@ -207,6 +299,8 @@ const Login: React.FC = () => {
 								placeholder="Enter your username"
 								required={!isLogin}
 								disabled={loading}
+								minLength={3}
+								maxLength={30}
 							/>
 						</div>
 					)}
@@ -260,15 +354,18 @@ const Login: React.FC = () => {
 
 					{error && (
 						<div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3">
-							<p className="text-sm text-red-800 dark:text-red-200">
-								{error}
-							</p>
+							<div className="flex items-center">
+								<AlertCircle className="h-5 w-5 text-red-600 dark:text-red-400 mr-2 flex-shrink-0" />
+								<p className="text-sm text-red-800 dark:text-red-200">
+									{error}
+								</p>
+							</div>
 						</div>
 					)}
 
 					<button
 						type="submit"
-						disabled={loading}
+						disabled={loading || connectionStatus === 'disconnected'}
 						className="w-full bg-gradient-to-r from-blue-600 to-purple-600 text-white py-3 px-4 rounded-lg font-medium hover:from-blue-700 hover:to-purple-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
 					>
 						{loading ? (

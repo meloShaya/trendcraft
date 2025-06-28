@@ -46,12 +46,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 			try {
 				console.log('🔄 [AUTH] Initializing authentication...');
 				
-				// Test Supabase connection first
+				// Test Supabase connection first with timeout
 				console.log('🔄 [AUTH] Testing Supabase connection...');
-				const { data: testData, error: testError } = await supabase
+				
+				const connectionTest = supabase
 					.from('users')
 					.select('count')
 					.limit(1);
+				
+				// Add timeout to connection test
+				const timeoutPromise = new Promise((_, reject) => {
+					setTimeout(() => reject(new Error('Connection timeout')), 10000);
+				});
+				
+				const { data: testData, error: testError } = await Promise.race([
+					connectionTest,
+					timeoutPromise
+				]) as any;
 				
 				if (testError) {
 					console.error('❌ [AUTH] Supabase connection failed:', testError);
@@ -83,6 +94,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 				}
 			} catch (error) {
 				console.error('❌ [AUTH] Critical error initializing auth:', error);
+				// Show user-friendly error for connection issues
+				if (error instanceof Error && error.message.includes('fetch')) {
+					console.error('❌ [AUTH] Network connection error - check internet connection and Supabase configuration');
+				}
 			} finally {
 				if (mounted) {
 					console.log('✅ [AUTH] Auth initialization complete, setting loading to false');
@@ -284,20 +299,37 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 		try {
 			console.log('🔄 [AUTH] Attempting login for:', email);
 			
-			const { data, error } = await supabase.auth.signInWithPassword({
+			// Add timeout to login request
+			const loginPromise = supabase.auth.signInWithPassword({
 				email,
 				password,
 			});
 			
+			const timeoutPromise = new Promise((_, reject) => {
+				setTimeout(() => reject(new Error('Login request timeout - please check your internet connection')), 15000);
+			});
+			
+			const { data, error } = await Promise.race([loginPromise, timeoutPromise]) as any;
+			
 			if (error) {
 				console.error('❌ [AUTH] Login error:', error.message);
-				throw new Error(error.message);
+				// Provide more specific error messages
+				if (error.message.includes('fetch')) {
+					throw new Error('Network error - please check your internet connection and try again');
+				} else if (error.message.includes('Invalid login credentials')) {
+					throw new Error('Invalid email or password');
+				} else {
+					throw new Error(error.message);
+				}
 			}
 			
 			console.log('✅ [AUTH] Login successful for:', email);
 			// The auth state change listener will handle setting user and token
 		} catch (error) {
 			console.error('❌ [AUTH] Login failed:', error);
+			if (error instanceof Error && error.message.includes('timeout')) {
+				throw new Error('Connection timeout - please check your internet connection and try again');
+			}
 			throw error;
 		}
 	};
@@ -310,7 +342,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 		try {
 			console.log('🔄 [AUTH] Attempting registration for:', email);
 			
-			const { data, error } = await supabase.auth.signUp({
+			// Add timeout to registration request
+			const registerPromise = supabase.auth.signUp({
 				email,
 				password,
 				options: { 
@@ -319,15 +352,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 				},
 			});
 			
+			const timeoutPromise = new Promise((_, reject) => {
+				setTimeout(() => reject(new Error('Registration request timeout - please check your internet connection')), 15000);
+			});
+			
+			const { data, error } = await Promise.race([registerPromise, timeoutPromise]) as any;
+			
 			if (error) {
 				console.error('❌ [AUTH] Registration error:', error.message);
-				throw new Error(error.message);
+				// Provide more specific error messages
+				if (error.message.includes('fetch')) {
+					throw new Error('Network error - please check your internet connection and try again');
+				} else if (error.message.includes('already registered')) {
+					throw new Error('An account with this email already exists');
+				} else {
+					throw new Error(error.message);
+				}
 			}
 			
 			console.log('✅ [AUTH] Registration successful for:', email);
 			// The auth state change listener will handle the rest
 		} catch (error) {
 			console.error('❌ [AUTH] Registration failed:', error);
+			if (error instanceof Error && error.message.includes('timeout')) {
+				throw new Error('Connection timeout - please check your internet connection and try again');
+			}
 			throw error;
 		}
 	};
@@ -361,7 +410,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 			
 			if (error) {
 				console.error('❌ [AUTH] Social login error:', error.message);
-				throw new Error(error.message);
+				if (error.message.includes('fetch')) {
+					throw new Error('Network error - please check your internet connection and try again');
+				} else {
+					throw new Error(error.message);
+				}
 			}
 			
 			console.log('✅ [AUTH] Social login initiated for:', provider);
