@@ -42,26 +42,43 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 		// Check for existing session on app load
 		const initializeAuth = async () => {
 			try {
-				console.log('🔄 Initializing authentication...');
+				console.log('🔄 [AUTH] Initializing authentication...');
+				
+				// Test Supabase connection first
+				console.log('🔄 [AUTH] Testing Supabase connection...');
+				const { data: testData, error: testError } = await supabase
+					.from('users')
+					.select('count')
+					.limit(1);
+				
+				if (testError) {
+					console.error('❌ [AUTH] Supabase connection failed:', testError);
+					throw new Error(`Database connection failed: ${testError.message}`);
+				}
+				
+				console.log('✅ [AUTH] Supabase connection successful');
 				
 				// Get the current session from Supabase
+				console.log('🔄 [AUTH] Getting current session...');
 				const { data: { session }, error } = await supabase.auth.getSession();
 				
 				if (error) {
-					console.error('❌ Error getting session:', error);
+					console.error('❌ [AUTH] Error getting session:', error);
 					setLoading(false);
 					return;
 				}
 
 				if (session?.user) {
-					console.log('✅ Found existing session for user:', session.user.id);
+					console.log('✅ [AUTH] Found existing session for user:', session.user.id);
 					await handleUserSession(session);
 				} else {
-					console.log('ℹ️ No existing session found');
+					console.log('ℹ️ [AUTH] No existing session found');
 				}
 			} catch (error) {
-				console.error('❌ Error initializing auth:', error);
+				console.error('❌ [AUTH] Critical error initializing auth:', error);
+				// Don't throw - just log and continue
 			} finally {
+				console.log('✅ [AUTH] Auth initialization complete, setting loading to false');
 				setLoading(false);
 			}
 		};
@@ -69,34 +86,47 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 		initializeAuth();
 
 		// Listen for auth state changes
+		console.log('🔄 [AUTH] Setting up auth state listener...');
 		const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-			console.log('🔄 Auth state changed:', event, session?.user?.id);
+			console.log('🔄 [AUTH] Auth state changed:', event, session?.user?.id);
 			
-			if (event === 'SIGNED_IN' && session) {
-				console.log('✅ User signed in:', session.user.id);
-				setLoading(true); // Show loading during profile fetch
-				await handleUserSession(session);
+			try {
+				if (event === 'SIGNED_IN' && session) {
+					console.log('✅ [AUTH] User signed in:', session.user.id);
+					setLoading(true); // Show loading during profile fetch
+					await handleUserSession(session);
+					setLoading(false);
+				} else if (event === 'SIGNED_OUT') {
+					console.log('👋 [AUTH] User signed out');
+					setUser(null);
+					setToken(null);
+					setLoading(false);
+				} else if (event === 'TOKEN_REFRESHED' && session) {
+					console.log('🔄 [AUTH] Token refreshed');
+					setToken(session.access_token);
+				}
+			} catch (error) {
+				console.error('❌ [AUTH] Error in auth state change handler:', error);
 				setLoading(false);
-			} else if (event === 'SIGNED_OUT') {
-				console.log('👋 User signed out');
-				setUser(null);
-				setToken(null);
-				setLoading(false);
-			} else if (event === 'TOKEN_REFRESHED' && session) {
-				console.log('🔄 Token refreshed');
-				setToken(session.access_token);
 			}
 		});
 
-		return () => subscription.unsubscribe();
+		return () => {
+			console.log('🔄 [AUTH] Cleaning up auth listener');
+			subscription.unsubscribe();
+		};
 	}, []);
 
 	const handleUserSession = async (session: any) => {
 		try {
+			console.log('🔄 [AUTH] Handling user session for:', session.user.id);
+			
 			// Set token immediately
 			setToken(session.access_token);
+			console.log('✅ [AUTH] Token set');
 			
 			// Fetch user profile from our users table
+			console.log('🔄 [AUTH] Fetching user profile...');
 			const { data: userProfile, error: userError } = await supabase
 				.from("users")
 				.select("*")
@@ -104,11 +134,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 				.single();
 
 			if (!userError && userProfile) {
-				console.log('✅ Found user profile:', userProfile.username);
+				console.log('✅ [AUTH] Found user profile:', userProfile.username);
 				setUser(userProfile);
 			} else if (userError?.code === 'PGRST116') {
 				// User profile doesn't exist, create it
-				console.log('🔄 Creating user profile...');
+				console.log('🔄 [AUTH] Creating user profile...');
 				
 				const userData = {
 					id: session.user.id,
@@ -124,6 +154,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 					bio: null
 				};
 
+				console.log('🔄 [AUTH] Inserting user data:', { ...userData, id: '[HIDDEN]' });
+
 				const { data: newUser, error: createError } = await supabase
 					.from('users')
 					.insert(userData)
@@ -131,27 +163,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 					.single();
 
 				if (!createError && newUser) {
-					console.log('✅ Created user profile:', newUser.username);
+					console.log('✅ [AUTH] Created user profile:', newUser.username);
 					setUser(newUser);
 					
 					// Auto-connect social account if applicable
 					await autoConnectSocialAccount(session, newUser.id);
 				} else {
-					console.error('❌ Error creating user profile:', createError);
+					console.error('❌ [AUTH] Error creating user profile:', createError);
 					// Create a fallback user object
-					setUser({
+					const fallbackUser = {
 						...userData,
 						is_active: true,
 						is_premium: false,
 						last_login_at: new Date().toISOString(),
 						created_at: new Date().toISOString(),
 						updated_at: new Date().toISOString()
-					});
+					};
+					console.log('⚠️ [AUTH] Using fallback user object');
+					setUser(fallbackUser);
 				}
 			} else {
-				console.error('❌ Error fetching user profile:', userError);
+				console.error('❌ [AUTH] Error fetching user profile:', userError);
 				// Create a fallback user object from session data
-				setUser({
+				const fallbackUser = {
 					id: session.user.id,
 					email: session.user.email || '',
 					username: session.user.user_metadata?.username || 
@@ -164,12 +198,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 					last_login_at: new Date().toISOString(),
 					created_at: session.user.created_at,
 					updated_at: new Date().toISOString()
-				});
+				};
+				console.log('⚠️ [AUTH] Using fallback user object from session');
+				setUser(fallbackUser);
 			}
 		} catch (error) {
-			console.error('❌ Error handling user session:', error);
+			console.error('❌ [AUTH] Critical error handling user session:', error);
 			// Still set a basic user object to prevent stuck states
-			setUser({
+			const emergencyUser = {
 				id: session.user.id,
 				email: session.user.email || '',
 				username: session.user.email?.split('@')[0] || 'user',
@@ -181,14 +217,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 				last_login_at: new Date().toISOString(),
 				created_at: session.user.created_at,
 				updated_at: new Date().toISOString()
-			});
+			};
+			console.log('🚨 [AUTH] Using emergency user object');
+			setUser(emergencyUser);
 		}
 	};
 
 	const autoConnectSocialAccount = async (session: any, userId: string) => {
 		try {
+			console.log('🔄 [AUTH] Auto-connecting social account...');
 			const provider = session.user.app_metadata?.provider;
-			if (!provider || provider === 'email') return;
+			if (!provider || provider === 'email') {
+				console.log('ℹ️ [AUTH] No social provider to connect');
+				return;
+			}
 
 			// Check if social account is already connected
 			const { data: existingAccount } = await supabase
@@ -216,15 +258,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 						is_connected: true,
 						last_sync_at: new Date().toISOString()
 					});
+				console.log('✅ [AUTH] Social account connected');
+			} else {
+				console.log('ℹ️ [AUTH] Social account already connected');
 			}
 		} catch (error) {
-			console.error('❌ Error auto-connecting social account:', error);
+			console.error('❌ [AUTH] Error auto-connecting social account:', error);
 		}
 	};
 
 	const login = async (email: string, password: string) => {
 		try {
-			console.log('🔄 Attempting login for:', email);
+			console.log('🔄 [AUTH] Attempting login for:', email);
 			
 			const { data, error } = await supabase.auth.signInWithPassword({
 				email,
@@ -232,14 +277,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 			});
 			
 			if (error) {
-				console.error('❌ Login error:', error.message);
+				console.error('❌ [AUTH] Login error:', error.message);
 				throw new Error(error.message);
 			}
 			
-			console.log('✅ Login successful for:', email);
+			console.log('✅ [AUTH] Login successful for:', email);
 			// The auth state change listener will handle setting user and token
 		} catch (error) {
-			console.error('❌ Login failed:', error);
+			console.error('❌ [AUTH] Login failed:', error);
 			throw error;
 		}
 	};
@@ -250,7 +295,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 		password: string
 	) => {
 		try {
-			console.log('🔄 Attempting registration for:', email);
+			console.log('🔄 [AUTH] Attempting registration for:', email);
 			
 			const { data, error } = await supabase.auth.signUp({
 				email,
@@ -262,33 +307,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 			});
 			
 			if (error) {
-				console.error('❌ Registration error:', error.message);
+				console.error('❌ [AUTH] Registration error:', error.message);
 				throw new Error(error.message);
 			}
 			
-			console.log('✅ Registration successful for:', email);
+			console.log('✅ [AUTH] Registration successful for:', email);
 			// The auth state change listener will handle the rest
 		} catch (error) {
-			console.error('❌ Registration failed:', error);
+			console.error('❌ [AUTH] Registration failed:', error);
 			throw error;
 		}
 	};
 
 	const logout = async () => {
 		try {
-			console.log('🔄 Logging out...');
+			console.log('🔄 [AUTH] Logging out...');
 			setUser(null);
 			setToken(null);
 			await supabase.auth.signOut();
-			console.log('✅ Logout successful');
+			console.log('✅ [AUTH] Logout successful');
 		} catch (error) {
-			console.error('❌ Logout error:', error);
+			console.error('❌ [AUTH] Logout error:', error);
 		}
 	};
 
 	const socialLogin = async (provider: "google" | "twitter" | "facebook") => {
 		try {
-			console.log('🔄 Attempting social login with:', provider);
+			console.log('🔄 [AUTH] Attempting social login with:', provider);
 			
 			const { error } = await supabase.auth.signInWithOAuth({ 
 				provider,
@@ -302,13 +347,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 			});
 			
 			if (error) {
-				console.error('❌ Social login error:', error.message);
+				console.error('❌ [AUTH] Social login error:', error.message);
 				throw new Error(error.message);
 			}
 			
-			console.log('✅ Social login initiated for:', provider);
+			console.log('✅ [AUTH] Social login initiated for:', provider);
 		} catch (error) {
-			console.error('❌ Social login failed:', error);
+			console.error('❌ [AUTH] Social login failed:', error);
 			throw error;
 		}
 	};
@@ -322,6 +367,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 		loading,
 		socialLogin,
 	};
+
+	console.log('🔄 [AUTH] Rendering AuthProvider with loading:', loading, 'user:', !!user);
 
 	return (
 		<AuthContext.Provider value={value}>{children}</AuthContext.Provider>

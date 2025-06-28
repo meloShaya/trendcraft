@@ -16,8 +16,16 @@ const Login: React.FC = () => {
 
 	const { user, login, register, socialLogin, loading: authLoading } = useAuth();
 
+	console.log('🔄 [LOGIN] Component state:', { 
+		authLoading, 
+		user: !!user, 
+		formLoading: loading,
+		isLogin 
+	});
+
 	// Don't redirect if still loading auth state
 	if (authLoading) {
+		console.log('🔄 [LOGIN] Auth still loading, showing loading screen');
 		return (
 			<div className="min-h-screen bg-gradient-to-br from-blue-50 to-purple-50 dark:from-gray-900 dark:to-gray-800 flex items-center justify-center p-4">
 				<div className="text-center">
@@ -29,20 +37,27 @@ const Login: React.FC = () => {
 	}
 
 	if (user) {
+		console.log('✅ [LOGIN] User authenticated, redirecting to dashboard');
 		return <Navigate to="/dashboard" replace />;
 	}
 
 	const handleSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
 		
+		console.log('🔄 [LOGIN] Form submitted:', { isLogin, email: formData.email });
+		
 		// Validate form
 		if (!formData.email || !formData.password) {
-			setError("Please fill in all required fields");
+			const errorMsg = "Please fill in all required fields";
+			console.error('❌ [LOGIN] Validation error:', errorMsg);
+			setError(errorMsg);
 			return;
 		}
 		
 		if (!isLogin && !formData.username) {
-			setError("Username is required for registration");
+			const errorMsg = "Username is required for registration";
+			console.error('❌ [LOGIN] Validation error:', errorMsg);
+			setError(errorMsg);
 			return;
 		}
 		
@@ -51,10 +66,10 @@ const Login: React.FC = () => {
 
 		try {
 			if (isLogin) {
-				console.log('🔄 Submitting login form...');
+				console.log('🔄 [LOGIN] Submitting login form...');
 				await login(formData.email, formData.password);
 			} else {
-				console.log('🔄 Submitting registration form...');
+				console.log('🔄 [LOGIN] Submitting registration form...');
 				await register(
 					formData.username,
 					formData.email,
@@ -62,9 +77,9 @@ const Login: React.FC = () => {
 				);
 			}
 			// Success - the auth context will handle navigation
-			console.log('✅ Form submission successful');
+			console.log('✅ [LOGIN] Form submission successful');
 		} catch (err: any) {
-			console.error('❌ Form submission error:', err);
+			console.error('❌ [LOGIN] Form submission error:', err);
 			setError(err.message || 'An error occurred. Please try again.');
 			setLoading(false); // Reset loading on error
 		}
@@ -84,14 +99,16 @@ const Login: React.FC = () => {
 		try {
 			setError("");
 			setLoading(true);
-			console.log('🔄 Initiating social login...');
+			console.log('🔄 [LOGIN] Initiating social login with:', provider);
 			await socialLogin(provider);
 		} catch (err: any) {
-			console.error('❌ Social login error:', err);
+			console.error('❌ [LOGIN] Social login error:', err);
 			setError(err.message || 'Social login failed. Please try again.');
 			setLoading(false);
 		}
 	};
+
+	console.log('🔄 [LOGIN] Rendering login form');
 
 	return (
 		<div className="min-h-screen bg-gradient-to-br from-blue-50 to-purple-50 dark:from-gray-900 dark:to-gray-800 flex items-center justify-center p-4">
@@ -262,6 +279,7 @@ const Login: React.FC = () => {
 				<div className="mt-6 text-center">
 					<button
 						onClick={() => {
+							console.log('🔄 [LOGIN] Switching form mode from', isLogin ? 'login' : 'register', 'to', !isLogin ? 'login' : 'register');
 							setIsLogin(!isLogin);
 							setError("");
 							setFormData({ username: "", email: "", password: "" });
