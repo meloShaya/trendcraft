@@ -29,12 +29,17 @@ const Login: React.FC = () => {
 	useEffect(() => {
 		const checkConnection = async () => {
 			try {
-				// Simple connectivity check
-				const response = await fetch('https://www.google.com/favicon.ico', { 
-					mode: 'no-cors',
+				// Check connection using the application's backend health endpoint
+				const response = await fetch('/api/health', { 
+					method: 'GET',
 					cache: 'no-cache'
 				});
-				setConnectionStatus('connected');
+				
+				if (response.ok) {
+					setConnectionStatus('connected');
+				} else {
+					setConnectionStatus('disconnected');
+				}
 			} catch (error) {
 				console.error('❌ [LOGIN] Connection check failed:', error);
 				setConnectionStatus('disconnected');

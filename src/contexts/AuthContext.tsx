@@ -153,18 +153,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 			setToken(session.access_token);
 			console.log('✅ [AUTH] Token set');
 			
-			// Fetch user profile from our users table
+			// Fetch user profile from our users table using maybeSingle() to avoid PGRST116 errors
 			console.log('🔄 [AUTH] Fetching user profile...');
 			const { data: userProfile, error: userError } = await supabase
 				.from("users")
 				.select("*")
 				.eq("id", session.user.id)
-				.single();
+				.maybeSingle();
 
 			if (!userError && userProfile) {
 				console.log('✅ [AUTH] Found user profile:', userProfile.username);
 				setUser(userProfile);
-			} else if (userError?.code === 'PGRST116') {
+			} else if (!userProfile) {
 				// User profile doesn't exist, create it
 				console.log('🔄 [AUTH] Creating user profile...');
 				
