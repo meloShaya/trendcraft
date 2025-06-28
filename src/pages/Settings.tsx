@@ -7,9 +7,9 @@ const Settings: React.FC = () => {
   const { user, token } = useAuth();
   const { isDark, toggleTheme } = useTheme();
   const [profile, setProfile] = useState({
-    name: '',
+    full_name: '',
     bio: '',
-    avatar: ''
+    avatar_url: ''
   });
   const [notifications, setNotifications] = useState({
     email: true,
@@ -20,8 +20,12 @@ const Settings: React.FC = () => {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (user?.profile) {
-      setProfile(user.profile);
+    if (user) {
+      setProfile({
+        full_name: user.full_name || '',
+        bio: user.bio || '',
+        avatar_url: user.avatar_url || ''
+      });
     }
   }, [user]);
 
@@ -101,7 +105,7 @@ const Settings: React.FC = () => {
             <div className="space-y-4">
               <div className="flex flex-col sm:flex-row items-start sm:items-center space-y-3 sm:space-y-0 sm:space-x-4">
                 <img
-                  src={profile.avatar}
+                  src={profile.avatar_url || 'https://images.pexels.com/photos/614810/pexels-photo-614810.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&fit=crop'}
                   alt="Profile"
                   className="h-16 w-16 rounded-full object-cover"
                 />
@@ -116,8 +120,8 @@ const Settings: React.FC = () => {
                 </label>
                 <input
                   type="text"
-                  name="name"
-                  value={profile.name}
+                  name="full_name"
+                  value={profile.full_name}
                   onChange={handleProfileChange}
                   className="w-full px-3 sm:px-4 py-2 sm:py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-white text-sm sm:text-base"
                 />

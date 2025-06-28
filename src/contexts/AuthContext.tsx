@@ -2,14 +2,17 @@ import React, { createContext, useContext, useState, useEffect } from "react";
 import { supabase } from "../lib/supabase";
 
 interface User {
-	id: number;
+	id: string;
 	username: string;
 	email: string;
-	profile: {
-		name: string;
-		bio: string;
-		avatar: string;
-	};
+	full_name: string | null;
+	bio: string | null;
+	avatar_url: string | null;
+	is_active: boolean | null;
+	is_premium: boolean | null;
+	last_login_at: string | null;
+	created_at: string | null;
+	updated_at: string | null;
 }
 
 interface AuthContextType {
@@ -60,10 +63,39 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 			password,
 		});
 		if (error) throw new Error(error.message);
+		
+		// Fetch user profile from our users table
+		const { data: userProfile, error: profileError } = await supabase
+			.from('users')
+			.select('*')
+			.eq('id', data.user.id)
+			.single();
+
+		if (profileError) {
+			console.error('Error fetching user profile:', profileError);
+			// Create a basic user object if profile fetch fails
+			const basicUser: User = {
+				id: data.user.id,
+				email: data.user.email || '',
+				username: data.user.user_metadata?.username || data.user.email?.split('@')[0] || 'user',
+				full_name: data.user.user_metadata?.full_name || null,
+				bio: null,
+				avatar_url: null,
+				is_active: true,
+				is_premium: false,
+				last_login_at: new Date().toISOString(),
+				created_at: data.user.created_at,
+				updated_at: new Date().toISOString()
+			};
+			setUser(basicUser);
+			localStorage.setItem("user", JSON.stringify(basicUser));
+		} else {
+			setUser(userProfile);
+			localStorage.setItem("user", JSON.stringify(userProfile));
+		}
+		
 		setToken(data.session.access_token);
-		setUser(data.user);
 		localStorage.setItem("token", data.session.access_token);
-		localStorage.setItem("user", JSON.stringify(data.user));
 	};
 
 	const register = async (
@@ -77,10 +109,50 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 			options: { data: { username } },
 		});
 		if (error) throw new Error(error.message);
-		setToken(data.session?.access_token);
-		setUser(data.user);
-		localStorage.setItem("token", data.session?.access_token || "");
-		localStorage.setItem("user", JSON.stringify(data.user));
+		
+		if (data.user) {
+			// Create user profile in our users table
+			const { data: userProfile, error: profileError } = await supabase
+				.from('users')
+				.insert({
+					id: data.user.id,
+					email: data.user.email,
+					username: username,
+					full_name: null,
+					bio: null,
+					avatar_url: null
+				})
+				.select()
+				.single();
+
+			if (profileError) {
+				console.error('Error creating user profile:', profileError);
+				// Create a basic user object if profile creation fails
+				const basicUser: User = {
+					id: data.user.id,
+					email: data.user.email || '',
+					username: username,
+					full_name: null,
+					bio: null,
+					avatar_url: null,
+					is_active: true,
+					is_premium: false,
+					last_login_at: new Date().toISOString(),
+					created_at: data.user.created_at,
+					updated_at: new Date().toISOString()
+				};
+				setUser(basicUser);
+				localStorage.setItem("user", JSON.stringify(basicUser));
+			} else {
+				setUser(userProfile);
+				localStorage.setItem("user", JSON.stringify(userProfile));
+			}
+			
+			if (data.session) {
+				setToken(data.session.access_token);
+				localStorage.setItem("token", data.session.access_token);
+			}
+		}
 	};
 
 	const logout = () => {
@@ -88,6 +160,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 		setToken(null);
 		localStorage.removeItem("token");
 		localStorage.removeItem("user");
+		supabase.auth.signOut();
 	};
 
 	const socialLogin = async (provider: "google" | "twitter" | "facebook") => {

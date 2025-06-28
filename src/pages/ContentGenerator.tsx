@@ -298,6 +298,10 @@ const ContentGenerator: React.FC = () => {
     { id: 'schedule', label: 'Schedule', icon: Clock, shortLabel: 'Sched' }
   ];
 
+  // Provide fallback values for user properties
+  const displayName = user?.full_name || user?.username || 'Demo User';
+  const avatarUrl = user?.avatar_url || 'https://images.pexels.com/photos/614810/pexels-photo-614810.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&fit=crop';
+
   return (
     <div className="max-w-7xl mx-auto space-y-4 sm:space-y-6">
       {/* Trend Notification */}
@@ -615,9 +619,9 @@ const ContentGenerator: React.FC = () => {
                   platform={generatedContent.platform}
                   content={generatedContent.content}
                   userProfile={{
-                    name: user?.profile.name || 'Demo User',
+                    name: displayName,
                     username: user?.username || 'demo_user',
-                    avatar: user?.profile.avatar || 'https://images.pexels.com/photos/614810/pexels-photo-614810.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&fit=crop',
+                    avatar: avatarUrl,
                     verified: true
                   }}
                   engagement={generatedContent.recommendations.engagementPrediction}

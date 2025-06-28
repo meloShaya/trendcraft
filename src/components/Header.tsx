@@ -11,6 +11,10 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
   const { user, logout } = useAuth();
   const { isDark, toggleTheme } = useTheme();
 
+  // Provide fallback values for user properties
+  const displayName = user?.full_name || user?.username || 'User';
+  const avatarUrl = user?.avatar_url || 'https://images.pexels.com/photos/614810/pexels-photo-614810.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&fit=crop';
+
   return (
     <header className="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700 px-3 sm:px-6 py-3 sm:py-4">
       <div className="flex items-center justify-between">
@@ -25,7 +29,7 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
           
           <div className="flex-1 min-w-0">
             <h1 className="text-base sm:text-lg lg:text-2xl font-semibold text-gray-900 dark:text-white truncate">
-              Welcome back, {user?.profile.name || user?.username}
+              Welcome back, {displayName}
             </h1>
             <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 mt-1 hidden sm:block">
               Let's create some viral content today
@@ -55,12 +59,12 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
           {/* Profile section - hidden on very small screens, shown on sm+ */}
           <div className="hidden sm:flex items-center space-x-2 sm:space-x-3 ml-2">
             <img
-              src={user?.profile.avatar}
-              alt={user?.profile.name}
+              src={avatarUrl}
+              alt={displayName}
               className="h-6 w-6 sm:h-8 sm:w-8 rounded-full object-cover"
             />
             <span className="text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-200 hidden md:block max-w-[100px] lg:max-w-none truncate">
-              {user?.profile.name}
+              {displayName}
             </span>
           </div>
           
