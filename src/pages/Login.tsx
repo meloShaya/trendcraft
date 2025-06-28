@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Navigate } from "react-router-dom";
-import { Zap, Eye, EyeOff } from "lucide-react";
+import { Zap, Eye, EyeOff, Loader } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 
 const Login: React.FC = () => {
@@ -22,21 +22,38 @@ const Login: React.FC = () => {
 
 	const handleSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
+		
+		// Validate form
+		if (!formData.email || !formData.password) {
+			setError("Please fill in all required fields");
+			return;
+		}
+		
+		if (!isLogin && !formData.username) {
+			setError("Username is required for registration");
+			return;
+		}
+		
 		setError("");
 		setLoading(true);
 
 		try {
 			if (isLogin) {
+				console.log('🔄 Submitting login form...');
 				await login(formData.email, formData.password);
 			} else {
+				console.log('🔄 Submitting registration form...');
 				await register(
 					formData.username,
 					formData.email,
 					formData.password
 				);
 			}
+			// Success - the auth context will handle navigation
+			console.log('✅ Form submission successful');
 		} catch (err: any) {
-			setError(err.message);
+			console.error('❌ Form submission error:', err);
+			setError(err.message || 'An error occurred. Please try again.');
 		} finally {
 			setLoading(false);
 		}
@@ -47,14 +64,20 @@ const Login: React.FC = () => {
 			...formData,
 			[e.target.name]: e.target.value,
 		});
+		// Clear error when user starts typing
+		if (error) setError("");
 	};
 
 	const handleSocialLogin = async (provider: "google" | "twitter" | "facebook") => {
 		try {
 			setError("");
+			setLoading(true);
+			console.log('🔄 Initiating social login...');
 			await socialLogin(provider);
 		} catch (err: any) {
-			setError(err.message);
+			console.error('❌ Social login error:', err);
+			setError(err.message || 'Social login failed. Please try again.');
+			setLoading(false);
 		}
 	};
 
@@ -79,7 +102,8 @@ const Login: React.FC = () => {
 				<div className="space-y-3 mb-6">
 					<button
 						onClick={() => handleSocialLogin("google")}
-						className="w-full flex items-center justify-center gap-3 bg-white dark:bg-gray-700 border-2 border-gray-200 dark:border-gray-600 rounded-xl py-3 px-4 font-medium text-gray-700 dark:text-white shadow-sm hover:bg-gray-50 dark:hover:bg-gray-600 hover:border-gray-300 dark:hover:border-gray-500 transition-all duration-200 group"
+						disabled={loading}
+						className="w-full flex items-center justify-center gap-3 bg-white dark:bg-gray-700 border-2 border-gray-200 dark:border-gray-600 rounded-xl py-3 px-4 font-medium text-gray-700 dark:text-white shadow-sm hover:bg-gray-50 dark:hover:bg-gray-600 hover:border-gray-300 dark:hover:border-gray-500 transition-all duration-200 group disabled:opacity-50 disabled:cursor-not-allowed"
 					>
 						<div className="w-5 h-5 bg-white rounded-full flex items-center justify-center shadow-sm">
 							<svg className="w-4 h-4" viewBox="0 0 24 24">
@@ -94,7 +118,8 @@ const Login: React.FC = () => {
 
 					<button
 						onClick={() => handleSocialLogin("twitter")}
-						className="w-full flex items-center justify-center gap-3 bg-black hover:bg-gray-800 border-2 border-black rounded-xl py-3 px-4 font-medium text-white shadow-sm transition-all duration-200 group"
+						disabled={loading}
+						className="w-full flex items-center justify-center gap-3 bg-black hover:bg-gray-800 border-2 border-black rounded-xl py-3 px-4 font-medium text-white shadow-sm transition-all duration-200 group disabled:opacity-50 disabled:cursor-not-allowed"
 					>
 						<div className="w-5 h-5 flex items-center justify-center">
 							<svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
@@ -106,7 +131,8 @@ const Login: React.FC = () => {
 
 					<button
 						onClick={() => handleSocialLogin("facebook")}
-						className="w-full flex items-center justify-center gap-3 bg-[#1877F2] hover:bg-[#166FE5] border-2 border-[#1877F2] rounded-xl py-3 px-4 font-medium text-white shadow-sm transition-all duration-200 group"
+						disabled={loading}
+						className="w-full flex items-center justify-center gap-3 bg-[#1877F2] hover:bg-[#166FE5] border-2 border-[#1877F2] rounded-xl py-3 px-4 font-medium text-white shadow-sm transition-all duration-200 group disabled:opacity-50 disabled:cursor-not-allowed"
 					>
 						<div className="w-5 h-5 flex items-center justify-center">
 							<svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
@@ -143,6 +169,7 @@ const Login: React.FC = () => {
 								className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-white transition-colors"
 								placeholder="Enter your username"
 								required={!isLogin}
+								disabled={loading}
 							/>
 						</div>
 					)}
@@ -159,6 +186,7 @@ const Login: React.FC = () => {
 							className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-white transition-colors"
 							placeholder="Enter your email"
 							required
+							disabled={loading}
 						/>
 					</div>
 
@@ -175,11 +203,14 @@ const Login: React.FC = () => {
 								className="w-full px-4 py-3 pr-12 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-white transition-colors"
 								placeholder="Enter your password"
 								required
+								disabled={loading}
+								minLength={6}
 							/>
 							<button
 								type="button"
 								onClick={() => setShowPassword(!showPassword)}
 								className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+								disabled={loading}
 							>
 								{showPassword ? (
 									<EyeOff className="h-5 w-5" />
@@ -201,20 +232,30 @@ const Login: React.FC = () => {
 					<button
 						type="submit"
 						disabled={loading}
-						className="w-full bg-gradient-to-r from-blue-600 to-purple-600 text-white py-3 px-4 rounded-lg font-medium hover:from-blue-700 hover:to-purple-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+						className="w-full bg-gradient-to-r from-blue-600 to-purple-600 text-white py-3 px-4 rounded-lg font-medium hover:from-blue-700 hover:to-purple-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
 					>
-						{loading
-							? "Please wait..."
-							: isLogin
-							? "Sign In"
-							: "Create Account"}
+						{loading ? (
+							<>
+								<Loader className="animate-spin h-5 w-5 mr-2" />
+								{isLogin ? "Signing in..." : "Creating account..."}
+							</>
+						) : (
+							<>
+								{isLogin ? "Sign In" : "Create Account"}
+							</>
+						)}
 					</button>
 				</form>
 
 				<div className="mt-6 text-center">
 					<button
-						onClick={() => setIsLogin(!isLogin)}
-						className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-medium transition-colors"
+						onClick={() => {
+							setIsLogin(!isLogin);
+							setError("");
+							setFormData({ username: "", email: "", password: "" });
+						}}
+						disabled={loading}
+						className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-medium transition-colors disabled:opacity-50"
 					>
 						{isLogin
 							? "Don't have an account? Sign up"
