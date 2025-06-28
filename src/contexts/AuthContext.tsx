@@ -31,7 +31,8 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export const useAuth = () => {
+// Fixed: Consistent export for Fast Refresh compatibility
+const useAuth = () => {
 	const context = useContext(AuthContext);
 	if (context === undefined) {
 		throw new Error("useAuth must be used within an AuthProvider");
@@ -39,7 +40,7 @@ export const useAuth = () => {
 	return context;
 };
 
-export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
+const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 	children,
 }) => {
 	const [user, setUser] = useState<User | null>(null);
@@ -82,11 +83,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 			
 			if (event === 'SIGNED_IN' && session) {
 				console.log('✅ User signed in:', session.user.id);
+				setLoading(true); // Show loading during profile fetch
 				await handleUserSession(session);
+				setLoading(false);
 			} else if (event === 'SIGNED_OUT') {
 				console.log('👋 User signed out');
 				setUser(null);
 				setToken(null);
+				setLoading(false);
 			} else if (event === 'TOKEN_REFRESHED' && session) {
 				console.log('🔄 Token refreshed');
 				setToken(session.access_token);
@@ -98,6 +102,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 
 	const handleUserSession = async (session: any) => {
 		try {
+			// Set token immediately
+			setToken(session.access_token);
+			
 			// Fetch user profile from our users table
 			const { data: userProfile, error: userError } = await supabase
 				.from("users")
@@ -108,42 +115,82 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 			if (!userError && userProfile) {
 				console.log('✅ Found user profile:', userProfile.username);
 				setUser(userProfile);
-				setToken(session.access_token);
 			} else if (userError?.code === 'PGRST116') {
 				// User profile doesn't exist, create it
 				console.log('🔄 Creating user profile...');
+				
+				const userData = {
+					id: session.user.id,
+					email: session.user.email,
+					username: session.user.user_metadata?.username || 
+						session.user.user_metadata?.preferred_username || 
+						session.user.email?.split('@')[0] || 
+						`user_${Date.now()}`,
+					full_name: session.user.user_metadata?.full_name || 
+						session.user.user_metadata?.name || null,
+					avatar_url: session.user.user_metadata?.avatar_url || 
+						session.user.user_metadata?.picture || null,
+					bio: null
+				};
+
 				const { data: newUser, error: createError } = await supabase
 					.from('users')
-					.insert({
-						id: session.user.id,
-						email: session.user.email,
-						username: session.user.user_metadata?.username || 
-							session.user.user_metadata?.preferred_username || 
-							session.user.email?.split('@')[0] || 'user',
-						full_name: session.user.user_metadata?.full_name || 
-							session.user.user_metadata?.name || null,
-						avatar_url: session.user.user_metadata?.avatar_url || 
-							session.user.user_metadata?.picture || null,
-						bio: null
-					})
+					.insert(userData)
 					.select()
 					.single();
 
 				if (!createError && newUser) {
 					console.log('✅ Created user profile:', newUser.username);
 					setUser(newUser);
-					setToken(session.access_token);
 					
 					// Auto-connect social account if applicable
 					await autoConnectSocialAccount(session, newUser.id);
 				} else {
 					console.error('❌ Error creating user profile:', createError);
+					// Create a fallback user object
+					setUser({
+						...userData,
+						is_active: true,
+						is_premium: false,
+						last_login_at: new Date().toISOString(),
+						created_at: new Date().toISOString(),
+						updated_at: new Date().toISOString()
+					});
 				}
 			} else {
 				console.error('❌ Error fetching user profile:', userError);
+				// Create a fallback user object from session data
+				setUser({
+					id: session.user.id,
+					email: session.user.email || '',
+					username: session.user.user_metadata?.username || 
+						session.user.email?.split('@')[0] || 'user',
+					full_name: session.user.user_metadata?.full_name || null,
+					bio: null,
+					avatar_url: session.user.user_metadata?.avatar_url || null,
+					is_active: true,
+					is_premium: false,
+					last_login_at: new Date().toISOString(),
+					created_at: session.user.created_at,
+					updated_at: new Date().toISOString()
+				});
 			}
 		} catch (error) {
 			console.error('❌ Error handling user session:', error);
+			// Still set a basic user object to prevent stuck states
+			setUser({
+				id: session.user.id,
+				email: session.user.email || '',
+				username: session.user.email?.split('@')[0] || 'user',
+				full_name: null,
+				bio: null,
+				avatar_url: null,
+				is_active: true,
+				is_premium: false,
+				last_login_at: new Date().toISOString(),
+				created_at: session.user.created_at,
+				updated_at: new Date().toISOString()
+			});
 		}
 	};
 
@@ -289,3 +336,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 		<AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 	);
 };
+
+// Fixed: Export both components consistently for Fast Refresh
+export { useAuth, AuthProvider };

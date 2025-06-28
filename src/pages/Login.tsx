@@ -14,7 +14,19 @@ const Login: React.FC = () => {
 	const [error, setError] = useState("");
 	const [loading, setLoading] = useState(false);
 
-	const { user, login, register, socialLogin } = useAuth();
+	const { user, login, register, socialLogin, loading: authLoading } = useAuth();
+
+	// Don't redirect if still loading auth state
+	if (authLoading) {
+		return (
+			<div className="min-h-screen bg-gradient-to-br from-blue-50 to-purple-50 dark:from-gray-900 dark:to-gray-800 flex items-center justify-center p-4">
+				<div className="text-center">
+					<div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+					<p className="text-gray-600 dark:text-gray-400">Loading...</p>
+				</div>
+			</div>
+		);
+	}
 
 	if (user) {
 		return <Navigate to="/dashboard" replace />;
@@ -54,9 +66,9 @@ const Login: React.FC = () => {
 		} catch (err: any) {
 			console.error('❌ Form submission error:', err);
 			setError(err.message || 'An error occurred. Please try again.');
-		} finally {
-			setLoading(false);
+			setLoading(false); // Reset loading on error
 		}
+		// Don't reset loading on success - let auth context handle it
 	};
 
 	const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
