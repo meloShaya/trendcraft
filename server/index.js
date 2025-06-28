@@ -17,6 +17,7 @@ import fetch from "node-fetch";
 import FormData from "form-data";
 import FirecrawlApp from "@mendable/firecrawl-js";
 import { supabase } from "./supabaseClient.js";
+import Stripe from "stripe";
 
 // Load environment variable
 dotenv.config();
@@ -25,6 +26,11 @@ const app = express();
 expressWs(app); // Initialize express-ws middleware
 const PORT = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET;
+
+// Initialize Stripe
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '', {
+  apiVersion: '2023-10-16',
+});
 
 if (!JWT_SECRET) {
 	console.error("FATAL ERROR: JWT_SECRET is not defined in your .env file.");
@@ -88,6 +94,8 @@ app.get("/", (req, res) => {
 			analytics: "/api/analytics/*",
 			user: "/api/user/*",
 			voice: "/api/voice/*",
+			subscription: "/api/subscription",
+			billing: "/api/billing/*",
 		},
 	});
 });
@@ -1203,6 +1211,93 @@ const authenticateToken = (req, res, next) => {
 	});
 };
 
+// Helper function to get or create user subscription
+const getUserSubscription = async (userId) => {
+	try {
+		const { data, error } = await supabase
+			.from('subscriptions')
+			.select('*')
+			.eq('user_id', userId)
+			.single();
+
+		if (error && error.code !== 'PGRST116') {
+			console.error('Error fetching subscription:', error);
+			return null;
+		}
+
+		if (!data) {
+			// Create default free subscription
+			const { data: newSub, error: createError } = await supabase
+				.from('subscriptions')
+				.insert({
+					user_id: userId,
+					plan: 'free',
+					status: 'active'
+				})
+				.select()
+				.single();
+
+			if (createError) {
+				console.error('Error creating subscription:', createError);
+				return null;
+			}
+
+			return newSub;
+		}
+
+		return data;
+	} catch (error) {
+		console.error('Error in getUserSubscription:', error);
+		return null;
+	}
+};
+
+// Helper function to get or create user usage
+const getUserUsage = async (userId) => {
+	try {
+		const currentMonth = new Date().toISOString().slice(0, 7) + '-01';
+		
+		const { data, error } = await supabase
+			.from('usage_tracking')
+			.select('*')
+			.eq('user_id', userId)
+			.eq('month', currentMonth)
+			.single();
+
+		if (error && error.code !== 'PGRST116') {
+			console.error('Error fetching usage:', error);
+			return null;
+		}
+
+		if (!data) {
+			// Create default usage record
+			const { data: newUsage, error: createError } = await supabase
+				.from('usage_tracking')
+				.insert({
+					user_id: userId,
+					month: currentMonth,
+					posts_generated: 0,
+					images_generated: 0,
+					videos_generated: 0
+				})
+				.select()
+				.single();
+
+			if (createError) {
+				console.error('Error creating usage:', createError);
+				return null;
+			}
+
+			return newUsage;
+		}
+
+		return data;
+	} catch (error) {
+		console.error('Error in getUserUsage:', error);
+		return null;
+	}
+};
+
 // Health check endpoint
 app.get("/api/health", (req, res) => {
 	res.json({ status: "OK", message: "TrendCraft API is running" });
@@ -1311,17 +1406,267 @@ app.post("/api/content/generate", authenticateToken, async (req, res) => {
 		isAnalysisOnly,
 		locationWoeid,
 	} = req.body;
-	const generatedContent = await generateContentWithAI(
-		topic,
-		platform,
-		tone,
-		targetAudience,
-		includeHashtags,
-		isAnalysisOnly,
-		locationWoeid // Pass location to AI generation
-	);
-	res.json(generatedContent);
+	
+	try {
+		// Check usage limits for free users
+		const subscription = await getUserSubscription(req.user.id);
+		const usage = await getUserUsage(req.user.id);
+		
+		if (subscription?.plan === 'free' && usage?.posts_generated >= 10) {
+			return res.status(403).json({ 
+				error: "Monthly post limit reached. Upgrade to Pro for unlimited posts.",
+				code: "USAGE_LIMIT_EXCEEDED"
+			});
+		}
+		
+		const generatedContent = await generateContentWithAI(
+			topic,
+			platform,
+			tone,
+			targetAudience,
+			includeHashtags,
+			isAnalysisOnly,
+			locationWoeid
+		);
+		
+		// Update usage count if not analysis only
+		if (!isAnalysisOnly && usage) {
+			await supabase
+				.from('usage_tracking')
+				.update({ 
+					posts_generated: usage.posts_generated + 1 
+				})
+				.eq('id', usage.id);
+		}
+		
+		res.json(generatedContent);
+	} catch (error) {
+		console.error('Error generating content:', error);
+		res.status(500).json({ error: "Failed to generate content" });
+	}
 });
+
+// Media generation endpoints
+app.post("/api/generate-image", authenticateToken, async (req, res) => {
+	try {
+		const { prompt } = req.body;
+		
+		// Check if user has premium access
+		const subscription = await getUserSubscription(req.user.id);
+		if (subscription?.plan !== 'pro') {
+			return res.status(403).json({ 
+				error: "Image generation requires Pro subscription",
+				code: "PREMIUM_REQUIRED"
+			});
+		}
+		
+		// TODO: Implement Google AI image generation
+		// For now, return a placeholder
+		res.json({
+			image_url: 'https://images.pexels.com/photos/267350/pexels-photo-267350.jpeg?auto=compress&cs=tinysrgb&w=800&h=600&fit=crop',
+			prompt: prompt
+		});
+	} catch (error) {
+		console.error('Error generating image:', error);
+		res.status(500).json({ error: "Failed to generate image" });
+	}
+});
+
+app.post("/api/generate-video", authenticateToken, async (req, res) => {
+	try {
+		const { script, background_url, replica_id, video_name } = req.body;
+		
+		// Check if user has premium access
+		const subscription = await getUserSubscription(req.user.id);
+		if (subscription?.plan !== 'pro') {
+			return res.status(403).json({ 
+				error: "Video generation requires Pro subscription",
+				code: "PREMIUM_REQUIRED"
+			});
+		}
+		
+		// Tavus AI API call
+		const options = {
+			method: 'POST',
+			headers: {
+				'x-api-key': process.env.TAVUS_API_KEY || '',
+				'Content-Type': 'application/json'
+			},
+			body: JSON.stringify({
+				background_url: background_url || "",
+				replica_id: replica_id || "",
+				script: script,
+				video_name: video_name || `video_${Date.now()}`
+			})
+		};
+
+		const response = await fetch('https://tavusapi.com/v2/videos', options);
+		const data = await response.json();
+		
+		if (response.ok) {
+			res.json(data);
+		} else {
+			// Return placeholder for now
+			res.json({
+				video_url: 'https://sample-videos.com/zip/10/mp4/SampleVideo_1280x720_1mb.mp4',
+				video_id: `placeholder_${Date.now()}`
+			});
+		}
+	} catch (error) {
+		console.error('Error generating video:', error);
+		res.status(500).json({ error: "Failed to generate video" });
+	}
+});
+
+// Subscription management endpoints
+app.get("/api/subscription", authenticateToken, async (req, res) => {
+	try {
+		const subscription = await getUserSubscription(req.user.id);
+		res.json(subscription);
+	} catch (error) {
+		console.error('Error fetching subscription:', error);
+		res.status(500).json({ error: "Failed to fetch subscription" });
+	}
+});
+
+app.get("/api/usage", authenticateToken, async (req, res) => {
+	try {
+		const usage = await getUserUsage(req.user.id);
+		res.json(usage);
+	} catch (error) {
+		console.error('Error fetching usage:', error);
+		res.status(500).json({ error: "Failed to fetch usage" });
+	}
+});
+
+// Stripe checkout session
+app.post("/api/create-checkout-session", authenticateToken, async (req, res) => {
+	try {
+		const { plan } = req.body;
+		
+		if (plan !== 'pro') {
+			return res.status(400).json({ error: "Invalid plan" });
+		}
+		
+		const session = await stripe.checkout.sessions.create({
+			payment_method_types: ['card'],
+			line_items: [
+				{
+					price_data: {
+						currency: 'usd',
+						product_data: {
+							name: 'TrendCraft Pro',
+							description: 'Unlimited posts, AI image/video generation, voice chat, and more',
+						},
+						unit_amount: 2900, // $29.00
+						recurring: {
+							interval: 'month',
+						},
+					},
+					quantity: 1,
+				},
+			],
+			mode: 'subscription',
+			success_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/dashboard?session_id={CHECKOUT_SESSION_ID}`,
+			cancel_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/generate`,
+			client_reference_id: req.user.id,
+			metadata: {
+				user_id: req.user.id,
+				plan: plan
+			}
+		});
+
+		res.json({ url: session.url });
+	} catch (error) {
+		console.error('Error creating checkout session:', error);
+		res.status(500).json({ error: "Failed to create checkout session" });
+	}
+});
+
+// Stripe billing portal
+app.post("/api/billing-portal", authenticateToken, async (req, res) => {
+	try {
+		const subscription = await getUserSubscription(req.user.id);
+		
+		if (!subscription?.stripe_customer_id) {
+			return res.status(400).json({ error: "No customer found" });
+		}
+		
+		const session = await stripe.billingPortal.sessions.create({
+			customer: subscription.stripe_customer_id,
+			return_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/settings`,
+		});
+
+		res.json({ url: session.url });
+	} catch (error) {
+		console.error('Error creating billing portal session:', error);
+		res.status(500).json({ error: "Failed to create billing portal session" });
+	}
+});
+
+// Stripe webhook
+app.post("/api/stripe-webhook", express.raw({ type: 'application/json' }), async (req, res) => {
+	const sig = req.headers['stripe-signature'];
+	let event;
+
+	try {
+		event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
+	} catch (err) {
+		console.error('Webhook signature verification failed:', err.message);
+		return res.status(400).send(`Webhook Error: ${err.message}`);
+	}
+
+	try {
+		switch (event.type) {
+			case 'checkout.session.completed':
+				const session = event.data.object;
+				await handleCheckoutCompleted(session);
+				break;
+			case 'customer.subscription.updated':
+			case 'customer.subscription.deleted':
+				const subscription = event.data.object;
+				await handleSubscriptionChange(subscription);
+				break;
+			default:
+				console.log(`Unhandled event type ${event.type}`);
+		}
+
+		res.json({ received: true });
+	} catch (error) {
+		console.error('Error handling webhook:', error);
+		res.status(500).json({ error: "Webhook handler failed" });
+	}
+});
+
+const handleCheckoutCompleted = async (session) => {
+	const userId = session.client_reference_id;
+	const customerId = session.customer;
+	const subscriptionId = session.subscription;
+
+	await supabase
+		.from('subscriptions')
+		.upsert({
+			user_id: userId,
+			stripe_customer_id: customerId,
+			stripe_subscription_id: subscriptionId,
+			plan: 'pro',
+			status: 'active'
+		}, {
+			onConflict: 'user_id'
+		});
+};
+
+const handleSubscriptionChange = async (subscription) => {
+	await supabase
+		.from('subscriptions')
+		.update({
+			status: subscription.status,
+			current_period_start: new Date(subscription.current_period_start * 1000).toISOString(),
+			current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
+			cancel_at_period_end: subscription.cancel_at_period_end
+		})
+		.eq('stripe_subscription_id', subscription.id);
+};
 
 // Voice AI Routes (keeping existing implementation)
 app.post("/api/voice/text-to-speech", authenticateToken, async (req, res) => {
@@ -1556,6 +1901,11 @@ app.listen(PORT, () => {
 	console.log(
 		`🎤 ElevenLabs: ${
 			process.env.ELEVENLABS_API_KEY ? "Configured" : "Not configured"
+		}`
+	);
+	console.log(
+		`💳 Stripe: ${
+			process.env.STRIPE_SECRET_KEY ? "Configured" : "Not configured"
 		}`
 	);
 	console.log("✅ Server started successfully!");

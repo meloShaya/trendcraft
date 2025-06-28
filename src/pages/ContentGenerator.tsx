@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { Sparkles, Copy, Send, RotateCcw, Zap, Target, Clock, TrendingUp, Settings, Eye, Hash, MessageSquare, Edit, Save, X } from 'lucide-react';
+import { Sparkles, Copy, Send, RotateCcw, Zap, Target, Clock, TrendingUp, Settings, Eye, Hash, MessageSquare, Edit, Save, X, AlertTriangle } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import PlatformPreview from '../components/PlatformPreview';
 import PlatformConnections from '../components/PlatformConnections';
 import PublishingControls from '../components/PublishingControls';
 import ScheduleManager from '../components/ScheduleManager';
 import PlatformOptimizationPanel from '../components/PlatformOptimizationPanel';
+import MediaGenerationOptions from '../components/MediaGenerationOptions';
+import PricingModal from '../components/PricingModal';
+import { useSubscription } from '../hooks/useSubscription';
 
 interface GeneratedContent {
   content: string;
@@ -29,6 +32,8 @@ interface GeneratedContent {
     visualSuggestions: string[];
     ctaSuggestions: string[];
   };
+  mediaUrl?: string;
+  mediaType?: 'image' | 'video';
 }
 
 interface TrendData {
@@ -41,11 +46,19 @@ interface TrendData {
   };
   peakTime: string;
   trendScore: number;
-  locationWoeid?: string; // Add location support
+  locationWoeid?: string;
 }
 
 const ContentGenerator: React.FC = () => {
   const { token, user } = useAuth();
+  const { 
+    subscription, 
+    usage, 
+    isPremium, 
+    canGeneratePost, 
+    createCheckoutSession 
+  } = useSubscription();
+  
   const [activeTab, setActiveTab] = useState<'generate' | 'preview' | 'publish' | 'schedule'>('generate');
   const [formData, setFormData] = useState({
     topic: '',
@@ -53,7 +66,8 @@ const ContentGenerator: React.FC = () => {
     tone: 'professional',
     includeHashtags: true,
     targetAudience: '',
-    locationWoeid: '1' // Add location to form data
+    locationWoeid: '1',
+    mediaOption: 'none' as 'none' | 'image' | 'video'
   });
   const [generatedContent, setGeneratedContent] = useState<GeneratedContent | null>(null);
   const [loading, setLoading] = useState(false);
@@ -64,6 +78,7 @@ const ContentGenerator: React.FC = () => {
   const [showOptimization, setShowOptimization] = useState(false);
   const [isEditingContent, setIsEditingContent] = useState(false);
   const [editedContent, setEditedContent] = useState('');
+  const [showPricingModal, setShowPricingModal] = useState(false);
 
   // Check for trend data from sessionStorage on component mount
   useEffect(() => {
@@ -72,21 +87,16 @@ const ContentGenerator: React.FC = () => {
       try {
         const trendData: TrendData = JSON.parse(savedTrendData);
         
-        // Pre-fill the form with trend data including location
         setFormData(prev => ({
           ...prev,
           topic: trendData.topic,
           targetAudience: trendData.demographics.interests.join(', ') || prev.targetAudience,
-          locationWoeid: trendData.locationWoeid || '1' // Use location from trend data
+          locationWoeid: trendData.locationWoeid || '1'
         }));
 
-        // Show notification about the pre-filled trend
         setTrendNotification(`Content form pre-filled with trending topic: "${trendData.topic}"`);
-        
-        // Clear the trend data from sessionStorage
         sessionStorage.removeItem('selectedTrend');
         
-        // Auto-hide notification after 5 seconds
         setTimeout(() => {
           setTrendNotification(null);
         }, 5000);
@@ -106,11 +116,76 @@ const ContentGenerator: React.FC = () => {
     }));
   };
 
+  const handleMediaOptionChange = (option: 'none' | 'image' | 'video') => {
+    setFormData(prev => ({
+      ...prev,
+      mediaOption: option
+    }));
+  };
+
+  const generateMediaContent = async (textContent: string, mediaType: 'image' | 'video') => {
+    try {
+      if (mediaType === 'image') {
+        // Google AI Image Generation (placeholder for now)
+        const imagePrompt = `Create a social media image for: ${textContent}. Style: modern, engaging, social media optimized`;
+        
+        // This would be the actual Google AI API call
+        // const response = await fetch('/api/generate-image', {
+        //   method: 'POST',
+        //   headers: {
+        //     'Content-Type': 'application/json',
+        //     Authorization: `Bearer ${token}`
+        //   },
+        //   body: JSON.stringify({ prompt: imagePrompt })
+        // });
+        
+        // For now, return a placeholder
+        return 'https://images.pexels.com/photos/267350/pexels-photo-267350.jpeg?auto=compress&cs=tinysrgb&w=800&h=600&fit=crop';
+        
+      } else if (mediaType === 'video') {
+        // Tavus AI Video Generation
+        const videoScript = textContent.length > 500 ? textContent.substring(0, 500) : textContent;
+        
+        const response = await fetch('/api/generate-video', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            script: videoScript,
+            background_url: "",
+            replica_id: "",
+            video_name: `social_media_video_${Date.now()}`
+          })
+        });
+        
+        if (response.ok) {
+          const videoData = await response.json();
+          return videoData.video_url || videoData.download_url;
+        }
+        
+        // Fallback placeholder
+        return 'https://sample-videos.com/zip/10/mp4/SampleVideo_1280x720_1mb.mp4';
+      }
+    } catch (error) {
+      console.error(`Error generating ${mediaType}:`, error);
+      return null;
+    }
+  };
+
   const generateContent = async () => {
     if (!formData.topic.trim()) return;
 
+    // Check usage limits
+    if (!canGeneratePost()) {
+      setShowPricingModal(true);
+      return;
+    }
+
     setLoading(true);
     try {
+      // Step 1: Generate text content
       const response = await fetch('/api/content/generate', {
         method: 'POST',
         headers: {
@@ -119,13 +194,25 @@ const ContentGenerator: React.FC = () => {
         },
         body: JSON.stringify({
           ...formData,
-          locationWoeid: formData.locationWoeid // Include location in request
+          locationWoeid: formData.locationWoeid
         })
       });
 
       if (response.ok) {
         const content = await response.json();
-        setGeneratedContent(content);
+        
+        // Step 2: Generate media if requested
+        let mediaUrl = null;
+        if (formData.mediaOption !== 'none' && isPremium) {
+          mediaUrl = await generateMediaContent(content.content, formData.mediaOption);
+        }
+        
+        setGeneratedContent({
+          ...content,
+          mediaUrl,
+          mediaType: formData.mediaOption !== 'none' ? formData.mediaOption : undefined
+        });
+        
         setActiveTab('preview');
         setShowOptimization(true);
         setIsEditingContent(false);
@@ -165,7 +252,8 @@ const ContentGenerator: React.FC = () => {
           platform: generatedContent.platform,
           viralScore: generatedContent.viralScore,
           hashtags: generatedContent.hashtags,
-          status: 'draft'
+          status: 'draft',
+          media_urls: generatedContent.mediaUrl ? [generatedContent.mediaUrl] : []
         })
       });
 
@@ -209,7 +297,6 @@ const ContentGenerator: React.FC = () => {
   const handleHashtagSuggestion = async (hashtags: string[]) => {
     if (!generatedContent) return;
     
-    // Add suggested hashtags to content
     const hashtagString = hashtags.join(' ');
     const updatedContent = `${generatedContent.content} ${hashtagString}`;
     
@@ -223,7 +310,6 @@ const ContentGenerator: React.FC = () => {
   const handleCTASuggestion = async (cta: string) => {
     if (!generatedContent) return;
     
-    // Add CTA to content
     const updatedContent = `${generatedContent.content} ${cta}`;
     
     setGeneratedContent(prev => prev ? {
@@ -245,14 +331,9 @@ const ContentGenerator: React.FC = () => {
 
     setIsPublishing(true);
     try {
-      // Simulate publishing delay
       await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      // In real implementation, this would call the publishing API for each platform
       console.log('Publishing to platforms:', platforms);
       alert(`Successfully published to ${platforms.join(', ')}!`);
-      
-      // Save as published post
       await savePost();
     } catch (error) {
       console.error('Publishing failed:', error);
@@ -266,7 +347,6 @@ const ContentGenerator: React.FC = () => {
     if (!generatedContent) return;
 
     try {
-      // In real implementation, this would save to scheduling system
       console.log('Scheduling post:', { platforms, scheduleTime, recurring });
       alert(`Post scheduled for ${scheduleTime.toLocaleString()}!`);
       setActiveTab('schedule');
@@ -278,17 +358,23 @@ const ContentGenerator: React.FC = () => {
 
   const handleEditScheduledPost = (postId: string) => {
     console.log('Edit post:', postId);
-    // In real implementation, load post data and switch to edit mode
   };
 
   const handleDeleteScheduledPost = (postId: string) => {
     console.log('Delete post:', postId);
-    // In real implementation, delete from schedule
   };
 
   const handleTogglePausePost = (postId: string) => {
     console.log('Toggle pause post:', postId);
-    // In real implementation, pause/resume scheduled post
+  };
+
+  const handleUpgrade = async (plan: 'pro') => {
+    try {
+      await createCheckoutSession(plan);
+    } catch (error) {
+      console.error('Upgrade failed:', error);
+      alert('Upgrade failed. Please try again.');
+    }
   };
 
   const tabs = [
@@ -298,12 +384,36 @@ const ContentGenerator: React.FC = () => {
     { id: 'schedule', label: 'Schedule', icon: Clock, shortLabel: 'Sched' }
   ];
 
-  // Provide fallback values for user properties
   const displayName = user?.full_name || user?.username || 'Demo User';
   const avatarUrl = user?.avatar_url || 'https://images.pexels.com/photos/614810/pexels-photo-614810.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&fit=crop';
 
   return (
     <div className="max-w-7xl mx-auto space-y-4 sm:space-y-6">
+      {/* Usage Warning for Free Users */}
+      {!isPremium && usage && (
+        <div className="bg-gradient-to-r from-orange-50 to-yellow-50 dark:from-orange-900/20 dark:to-yellow-900/20 border border-orange-200 dark:border-orange-800 rounded-lg p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <AlertTriangle className="h-5 w-5 text-orange-600 dark:text-orange-400" />
+              <div>
+                <p className="text-sm font-medium text-orange-900 dark:text-orange-200">
+                  Free Plan: {usage.posts_generated}/10 posts used this month
+                </p>
+                <p className="text-xs text-orange-700 dark:text-orange-300">
+                  Upgrade to Pro for unlimited posts and premium features
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setShowPricingModal(true)}
+              className="px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 text-white text-sm rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all"
+            >
+              Upgrade Now
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Trend Notification */}
       {trendNotification && (
         <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 flex items-center justify-between">
@@ -330,7 +440,6 @@ const ContentGenerator: React.FC = () => {
             <h1 className="text-lg sm:text-2xl font-bold text-gray-900 dark:text-white">AI Content Studio</h1>
           </div>
           
-          {/* Tab Navigation - Responsive */}
           <div className="flex space-x-1 bg-gray-100 dark:bg-gray-700 rounded-lg p-1 overflow-x-auto">
             {tabs.map((tab) => (
               <button
@@ -354,7 +463,6 @@ const ContentGenerator: React.FC = () => {
         <div className="p-3 sm:p-6">
           {activeTab === 'generate' && (
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 sm:gap-8">
-              {/* Input Form */}
               <div className="xl:col-span-2 space-y-4 sm:space-y-6">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -421,6 +529,14 @@ const ContentGenerator: React.FC = () => {
                   />
                 </div>
 
+                {/* Media Generation Options */}
+                <MediaGenerationOptions
+                  selectedOption={formData.mediaOption}
+                  onOptionChange={handleMediaOptionChange}
+                  isPremium={isPremium}
+                  onUpgradeClick={() => setShowPricingModal(true)}
+                />
+
                 <div className="flex items-center">
                   <input
                     type="checkbox"
@@ -436,7 +552,7 @@ const ContentGenerator: React.FC = () => {
 
                 <button
                   onClick={generateContent}
-                  disabled={loading || !formData.topic.trim()}
+                  disabled={loading || !formData.topic.trim() || !canGeneratePost()}
                   className="w-full bg-gradient-to-r from-blue-600 to-purple-600 text-white py-2 sm:py-3 px-4 sm:px-6 rounded-lg font-medium hover:from-blue-700 hover:to-purple-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center text-sm sm:text-base"
                 >
                   {loading ? (
@@ -463,6 +579,25 @@ const ContentGenerator: React.FC = () => {
                       <p className="text-gray-800 dark:text-gray-200 whitespace-pre-wrap leading-relaxed text-sm sm:text-base">
                         {generatedContent.content}
                       </p>
+                      
+                      {/* Show generated media */}
+                      {generatedContent.mediaUrl && (
+                        <div className="mt-4">
+                          {generatedContent.mediaType === 'image' ? (
+                            <img 
+                              src={generatedContent.mediaUrl} 
+                              alt="Generated content" 
+                              className="w-full max-w-md rounded-lg"
+                            />
+                          ) : (
+                            <video 
+                              src={generatedContent.mediaUrl} 
+                              controls 
+                              className="w-full max-w-md rounded-lg"
+                            />
+                          )}
+                        </div>
+                      )}
                     </div>
 
                     {/* Performance Predictions */}
@@ -610,6 +745,25 @@ const ContentGenerator: React.FC = () => {
                       <p className="text-gray-900 dark:text-white whitespace-pre-wrap leading-relaxed">
                         {generatedContent.content}
                       </p>
+                      
+                      {/* Show generated media in preview */}
+                      {generatedContent.mediaUrl && (
+                        <div className="mt-4">
+                          {generatedContent.mediaType === 'image' ? (
+                            <img 
+                              src={generatedContent.mediaUrl} 
+                              alt="Generated content" 
+                              className="w-full max-w-md rounded-lg"
+                            />
+                          ) : (
+                            <video 
+                              src={generatedContent.mediaUrl} 
+                              controls 
+                              className="w-full max-w-md rounded-lg"
+                            />
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -625,6 +779,10 @@ const ContentGenerator: React.FC = () => {
                     verified: true
                   }}
                   engagement={generatedContent.recommendations.engagementPrediction}
+                  media={generatedContent.mediaUrl ? [{
+                    type: generatedContent.mediaType || 'image',
+                    url: generatedContent.mediaUrl
+                  }] : undefined}
                 />
                 
                 <div className="flex flex-col sm:flex-row justify-center space-y-3 sm:space-y-0 sm:space-x-4 mt-6">
@@ -678,6 +836,13 @@ const ContentGenerator: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Pricing Modal */}
+      <PricingModal
+        isOpen={showPricingModal}
+        onClose={() => setShowPricingModal(false)}
+        onUpgrade={handleUpgrade}
+      />
     </div>
   );
 };
