@@ -47,17 +47,67 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 	const [loading, setLoading] = useState(true);
 
 	useEffect(() => {
-		const savedToken = localStorage.getItem("token");
-		const savedUser = localStorage.getItem("user");
+		// Check for existing session on app load
+		const initializeAuth = async () => {
+			try {
+				// Get the current session from Supabase
+				const { data: { session }, error } = await supabase.auth.getSession();
+				
+				if (error) {
+					console.error('Error getting session:', error);
+					setLoading(false);
+					return;
+				}
 
-		if (savedToken && savedUser) {
-			setToken(savedToken);
-			setUser(JSON.parse(savedUser));
-		}
-		setLoading(false);
+				if (session?.user) {
+					// Fetch user profile from our users table
+					const { data: userProfile, error: userError } = await supabase
+						.from("users")
+						.select("*")
+						.eq("id", session.user.id)
+						.single();
+
+					if (!userError && userProfile) {
+						setUser(userProfile);
+						setToken(session.access_token);
+					} else {
+						// If user profile doesn't exist, create it
+						const { data: newUser, error: createError } = await supabase
+							.from('users')
+							.insert({
+								id: session.user.id,
+								email: session.user.email,
+								username: session.user.user_metadata?.username || 
+									session.user.user_metadata?.preferred_username || 
+									session.user.email?.split('@')[0] || 'user',
+								full_name: session.user.user_metadata?.full_name || 
+									session.user.user_metadata?.name || null,
+								avatar_url: session.user.user_metadata?.avatar_url || 
+									session.user.user_metadata?.picture || null,
+								bio: null
+							})
+							.select()
+							.single();
+
+						if (!createError && newUser) {
+							setUser(newUser);
+							setToken(session.access_token);
+						}
+					}
+				}
+			} catch (error) {
+				console.error('Error initializing auth:', error);
+			} finally {
+				setLoading(false);
+			}
+		};
+
+		initializeAuth();
 
 		// Listen for auth state changes
 		const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+			console.log('Auth state changed:', event, session?.user?.id);
+			
 			if (event === 'SIGNED_IN' && session) {
 				// Handle social login success
 				try {
@@ -89,7 +139,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 
 						if (!createError && newUser) {
 							setUser(newUser);
-							localStorage.setItem("user", JSON.stringify(newUser));
 							
 							// Auto-connect social account
 							await autoConnectSocialAccount(session, newUser.id);
@@ -111,7 +160,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 
 						if (updatedUser) {
 							setUser(updatedUser);
-							localStorage.setItem("user", JSON.stringify(updatedUser));
 							
 							// Auto-connect social account if not already connected
 							await autoConnectSocialAccount(session, updatedUser.id);
@@ -119,15 +167,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 					}
 
 					setToken(session.access_token);
-					localStorage.setItem("token", session.access_token);
 				} catch (error) {
 					console.error('Error handling social login:', error);
 				}
 			} else if (event === 'SIGNED_OUT') {
 				setUser(null);
 				setToken(null);
-				localStorage.removeItem("token");
-				localStorage.removeItem("user");
+			} else if (event === 'TOKEN_REFRESHED' && session) {
+				// Update token when it's refreshed
+				setToken(session.access_token);
 			}
 		});
 
@@ -202,14 +250,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 				updated_at: new Date().toISOString()
 			};
 			setUser(basicUser);
-			localStorage.setItem("user", JSON.stringify(basicUser));
 		} else {
 			setUser(userProfile);
-			localStorage.setItem("user", JSON.stringify(userProfile));
 		}
 		
 		setToken(data.session.access_token);
-		localStorage.setItem("token", data.session.access_token);
 	};
 
 	const register = async (
@@ -256,15 +301,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 					updated_at: new Date().toISOString()
 				};
 				setUser(basicUser);
-				localStorage.setItem("user", JSON.stringify(basicUser));
 			} else {
 				setUser(userProfile);
-				localStorage.setItem("user", JSON.stringify(userProfile));
 			}
 			
 			if (data.session) {
 				setToken(data.session.access_token);
-				localStorage.setItem("token", data.session.access_token);
 			}
 		}
 	};
@@ -272,8 +314,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 	const logout = () => {
 		setUser(null);
 		setToken(null);
-		localStorage.removeItem("token");
-		localStorage.removeItem("user");
 		supabase.auth.signOut();
 	};
 

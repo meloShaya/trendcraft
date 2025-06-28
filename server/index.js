@@ -346,6 +346,86 @@ const fetchTrendsFromRapidAPI = async (
 	}
 };
 
+// Function to store trends in database
+const storeTrendsInDatabase = async (trends, platform, location) => {
+	try {
+		const locationName = getLocationNameByWoeid(location);
+		
+		for (const trend of trends) {
+			const { error } = await supabase
+				.from('trends')
+				.upsert({
+					keyword: trend.keyword,
+					platform: platform,
+					location_woeid: location.toString(),
+					location_name: locationName,
+					category: trend.category,
+					trend_score: trend.trendScore,
+					volume: trend.volume,
+					growth_percentage: trend.growth,
+					related_hashtags: trend.relatedHashtags,
+					peak_time: trend.peakTime,
+					demographics: trend.demographics,
+					expires_at: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(), // 2 hours from now
+				}, {
+					onConflict: 'keyword,platform,location_woeid'
+				});
+			
+			if (error) {
+				console.error('Error storing trend in database:', error);
+			}
+		}
+		
+		console.log(`✅ Stored ${trends.length} trends in database for ${platform} - ${locationName}`);
+	} catch (error) {
+		console.error('Error storing trends in database:', error);
+	}
+};
+
+// Function to get trends from database
+const getTrendsFromDatabase = async (platform, location, limit = 20) => {
+	try {
+		const { data, error } = await supabase
+			.from('trends')
+			.select('*')
+			.eq('platform', platform)
+			.eq('location_woeid', location.toString())
+			.gt('expires_at', new Date().toISOString())
+			.order('trend_score', { ascending: false })
+			.limit(limit);
+
+		if (error) {
+			console.error('Error fetching trends from database:', error);
+			return [];
+		}
+
+		if (!data || data.length === 0) {
+			console.log(`No cached trends found in database for ${platform} - ${location}`);
+			return [];
+		}
+
+		// Transform database data to frontend format
+		const transformedTrends = data.map((trend, index) => ({
+			id: index + 1,
+			keyword: trend.keyword,
+			category: trend.category,
+			trendScore: trend.trend_score,
+			volume: trend.volume,
+			growth: trend.growth_percentage,
+			platforms: [trend.platform],
+			relatedHashtags: trend.related_hashtags || [],
+			peakTime: trend.peak_time,
+			demographics: trend.demographics || { age: "18-34", interests: [] },
+		}));
+
+		console.log(`✅ Retrieved ${transformedTrends.length} cached trends from database`);
+		return transformedTrends;
+	} catch (error) {
+		console.error('Error getting trends from database:', error);
+		return [];
+	}
+};
+
 // Helper function to format peak time from API timestamp
 const formatPeakTime = (asOfTime) => {
 	if (!asOfTime) {
@@ -1177,33 +1257,38 @@ app.get("/api/auth/oauth/:provider", async (req, res) => {
 	res.redirect(data.url);
 });
 
-// Enhanced Trends Routes with RapidAPI and location support
+// Enhanced Trends Routes with database caching and API fallback
 app.get("/api/trends", authenticateToken, async (req, res) => {
 	try {
 		const { platform = "twitter", limit = 20, location = "1" } = req.query;
 
 		console.log(
-			`API: Fetching REAL trends for platform: ${platform}, location: ${location}, limit: ${limit}`
+			`API: Fetching trends for platform: ${platform}, location: ${location}, limit: ${limit}`
 		);
 
-		// Fetch ONLY real data from RapidAPI for Twitter, empty for others
-		let trends = await fetchTrendsFromRapidAPI(platform, location);
+		// Step 1: Try to get trends from database first
+		let trends = await getTrendsFromDatabase(platform, location, parseInt(limit));
 
-		// If no real data available, return empty array
+		// Step 2: If no cached trends found, fetch from external API and cache them
 		if (!trends || trends.length === 0) {
-			console.log(
-				`No real trends data available for ${platform} - returning empty array`
-			);
-			return res.json([]);
+			console.log('No cached trends found, fetching from external API...');
+			
+			// Fetch from external API
+			const apiTrends = await fetchTrendsFromRapidAPI(platform, location);
+			
+			if (apiTrends && apiTrends.length > 0) {
+				// Store in database for future requests
+				await storeTrendsInDatabase(apiTrends, platform, location);
+				trends = apiTrends.slice(0, parseInt(limit));
+			} else {
+				trends = [];
+			}
 		}
 
-		// Limit results
-		const limitedTrends = trends.slice(0, parseInt(limit));
-
 		console.log(
-			`API: Returning ${limitedTrends.length} REAL trends for ${platform}`
+			`API: Returning ${trends.length} trends for ${platform}`
 		);
-		res.json(limitedTrends);
+		res.json(trends);
 	} catch (error) {
 		console.error("Error in /api/trends:", error);
 		res.status(500).json({ error: "Failed to fetch trends" });
@@ -1457,7 +1542,7 @@ app.listen(PORT, () => {
 	console.log(
 		`🕷️ RapidAPI: ${
 			process.env.X_RapidAPI_Key
-				? "Configured - REAL DATA ONLY"
+				? "Configured - REAL DATA WITH DB CACHING"
 				: "Not configured - NO FALLBACKS"
 		}`
 	);
