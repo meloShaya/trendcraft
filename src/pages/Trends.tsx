@@ -25,7 +25,7 @@ interface Location {
 }
 
 const Trends: React.FC = () => {
-  const { token, logout } = useAuth();
+  const { token } = useAuth();
   const navigate = useNavigate();
   const [trends, setTrends] = useState<Trend[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
@@ -47,9 +47,24 @@ const Trends: React.FC = () => {
         if (response.ok) {
           const data = await response.json();
           setLocations(data);
+        } else {
+          // Set default locations if API fails
+          setLocations([
+            { name: "Worldwide", woeid: 1 },
+            { name: "United States", woeid: 23424977 },
+            { name: "United Kingdom", woeid: 23424975 },
+            { name: "Canada", woeid: 23424775 },
+          ]);
         }
       } catch (error) {
         console.error('Error fetching locations:', error);
+        // Set default locations on error
+        setLocations([
+          { name: "Worldwide", woeid: 1 },
+          { name: "United States", woeid: 23424977 },
+          { name: "United Kingdom", woeid: 23424975 },
+          { name: "Canada", woeid: 23424775 },
+        ]);
       }
     };
 
@@ -67,8 +82,9 @@ const Trends: React.FC = () => {
         });
         
         if (response.status === 401 || response.status === 403) {
-          // Authentication failed - logout user and redirect to login
-          logout();
+          // Don't logout automatically - just show error state
+          console.error('Authentication failed for trends');
+          setTrends([]);
           return;
         }
         
@@ -98,7 +114,7 @@ const Trends: React.FC = () => {
     if (token) {
       fetchTrends();
     }
-  }, [token, selectedPlatform, selectedLocation, logout]);
+  }, [token, selectedPlatform, selectedLocation]);
 
   const filteredTrends = trends.filter(trend =>
     trend.keyword.toLowerCase().includes(searchTerm.toLowerCase()) ||

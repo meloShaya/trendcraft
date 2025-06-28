@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { User, Bell, Shield, Palette, Globe, Save } from 'lucide-react';
+import { User, Bell, Shield, Palette, Globe, Save, Upload, Camera } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 
@@ -18,6 +18,7 @@ const Settings: React.FC = () => {
     performance: true
   });
   const [saving, setSaving] = useState(false);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -43,6 +44,44 @@ const Settings: React.FC = () => {
     });
   };
 
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      alert('Please select an image file');
+      return;
+    }
+
+    // Validate file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      alert('Image size should be less than 5MB');
+      return;
+    }
+
+    setUploadingAvatar(true);
+    
+    try {
+      // For now, we'll use a placeholder URL
+      // In a real implementation, you would upload to a service like Supabase Storage
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const imageUrl = event.target?.result as string;
+        setProfile(prev => ({
+          ...prev,
+          avatar_url: imageUrl
+        }));
+        setUploadingAvatar(false);
+      };
+      reader.readAsDataURL(file);
+    } catch (error) {
+      console.error('Error uploading avatar:', error);
+      alert('Failed to upload avatar. Please try again.');
+      setUploadingAvatar(false);
+    }
+  };
+
   const saveProfile = async () => {
     setSaving(true);
     try {
@@ -57,9 +96,12 @@ const Settings: React.FC = () => {
 
       if (response.ok) {
         alert('Profile updated successfully!');
+      } else {
+        alert('Failed to update profile. Please try again.');
       }
     } catch (error) {
       console.error('Error updating profile:', error);
+      alert('Failed to update profile. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -104,14 +146,34 @@ const Settings: React.FC = () => {
             
             <div className="space-y-4">
               <div className="flex flex-col sm:flex-row items-start sm:items-center space-y-3 sm:space-y-0 sm:space-x-4">
-                <img
-                  src={profile.avatar_url || 'https://images.pexels.com/photos/614810/pexels-photo-614810.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&fit=crop'}
-                  alt="Profile"
-                  className="h-16 w-16 rounded-full object-cover"
-                />
-                <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm sm:text-base">
-                  Change Avatar
-                </button>
+                <div className="relative">
+                  <img
+                    src={profile.avatar_url || 'https://images.pexels.com/photos/614810/pexels-photo-614810.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&fit=crop'}
+                    alt="Profile"
+                    className="h-16 w-16 rounded-full object-cover"
+                  />
+                  {uploadingAvatar && (
+                    <div className="absolute inset-0 bg-black bg-opacity-50 rounded-full flex items-center justify-center">
+                      <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-white"></div>
+                    </div>
+                  )}
+                  <label className="absolute bottom-0 right-0 bg-blue-600 text-white p-1 rounded-full cursor-pointer hover:bg-blue-700 transition-colors">
+                    <Camera className="h-3 w-3" />
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleAvatarUpload}
+                      className="hidden"
+                      disabled={uploadingAvatar}
+                    />
+                  </label>
+                </div>
+                <div className="flex-1">
+                  <h3 className="font-medium text-gray-900 dark:text-white">Profile Picture</h3>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    Click the camera icon to upload a new avatar. Max size: 5MB
+                  </p>
+                </div>
               </div>
 
               <div>
@@ -124,6 +186,7 @@ const Settings: React.FC = () => {
                   value={profile.full_name}
                   onChange={handleProfileChange}
                   className="w-full px-3 sm:px-4 py-2 sm:py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-white text-sm sm:text-base"
+                  placeholder="Enter your full name"
                 />
               </div>
 
@@ -139,6 +202,21 @@ const Settings: React.FC = () => {
                   className="w-full px-3 sm:px-4 py-2 sm:py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-white resize-none text-sm sm:text-base"
                   placeholder="Tell us about yourself..."
                 />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Username
+                </label>
+                <input
+                  type="text"
+                  value={user?.username || ''}
+                  disabled
+                  className="w-full px-3 sm:px-4 py-2 sm:py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-600 text-gray-500 dark:text-gray-400 text-sm sm:text-base"
+                />
+                <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 mt-1">
+                  Username cannot be changed
+                </p>
               </div>
 
               <div>

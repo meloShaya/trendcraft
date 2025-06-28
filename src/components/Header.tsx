@@ -13,11 +13,11 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
   const [showNotifications, setShowNotifications] = useState(false);
 
   // Provide fallback values for user properties
-  const displayName = user?.full_name || user?.username || 'User';
+  const displayName = user?.full_name || user?.username || user?.email?.split('@')[0] || 'User';
   const avatarUrl = user?.avatar_url || 'https://images.pexels.com/photos/614810/pexels-photo-614810.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&fit=crop';
 
   // Mock notifications - replace with real data later
-  const notifications = [
+  const [notifications, setNotifications] = useState([
     {
       id: 1,
       title: "New trend detected",
@@ -39,9 +39,17 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
       time: "1 day ago",
       unread: false
     }
-  ];
+  ]);
 
   const unreadCount = notifications.filter(n => n.unread).length;
+
+  const markAllAsRead = () => {
+    setNotifications(prev => prev.map(n => ({ ...n, unread: false })));
+  };
+
+  const markAsRead = (id: number) => {
+    setNotifications(prev => prev.map(n => n.id === id ? { ...n, unread: false } : n));
+  };
 
   return (
     <header className="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700 px-3 sm:px-6 py-3 sm:py-4">
@@ -92,8 +100,16 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
             {/* Notifications Dropdown */}
             {showNotifications && (
               <div className="absolute right-0 mt-2 w-80 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-50">
-                <div className="p-4 border-b border-gray-200 dark:border-gray-700">
+                <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
                   <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Notifications</h3>
+                  {unreadCount > 0 && (
+                    <button 
+                      onClick={markAllAsRead}
+                      className="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-medium"
+                    >
+                      Mark all read
+                    </button>
+                  )}
                 </div>
                 <div className="max-h-64 overflow-y-auto">
                   {notifications.map((notification) => (
@@ -102,6 +118,7 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
                       className={`p-4 border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer ${
                         notification.unread ? 'bg-blue-50 dark:bg-blue-900/20' : ''
                       }`}
+                      onClick={() => markAsRead(notification.id)}
                     >
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
@@ -123,7 +140,13 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
                   ))}
                 </div>
                 <div className="p-3 border-t border-gray-200 dark:border-gray-700">
-                  <button className="text-sm text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-medium">
+                  <button 
+                    onClick={() => {
+                      setShowNotifications(false);
+                      // Navigate to notifications page when implemented
+                    }}
+                    className="text-sm text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-medium"
+                  >
                     View all notifications
                   </button>
                 </div>
