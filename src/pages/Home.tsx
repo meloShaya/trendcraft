@@ -17,7 +17,9 @@ import {
   Heart,
   Play,
   Menu,
-  X
+  X,
+  Crown,
+  Check
 } from 'lucide-react';
 
 const Home: React.FC = () => {
@@ -107,14 +109,77 @@ const Home: React.FC = () => {
     }
   ];
 
+  const pricingPlans = [
+    {
+      name: "Free",
+      price: "$0",
+      period: "forever",
+      description: "Perfect for getting started",
+      features: [
+        "10 posts per month",
+        "Basic trend analysis",
+        "Text-only content",
+        "Basic analytics",
+        "Community support"
+      ],
+      limitations: [
+        "No image generation",
+        "No video generation",
+        "No voice chat",
+        "Limited analytics"
+      ],
+      buttonText: "Get Started Free",
+      popular: false,
+      color: "border-gray-200 dark:border-gray-700"
+    },
+    {
+      name: "Pro",
+      price: "$29",
+      period: "per month",
+      description: "For serious content creators",
+      features: [
+        "Unlimited posts",
+        "Advanced trend analysis",
+        "AI image generation",
+        "AI video generation",
+        "Voice chat with AI",
+        "Twitter thread generation",
+        "Advanced analytics",
+        "Priority support",
+        "Custom branding",
+        "Export capabilities"
+      ],
+      limitations: [],
+      buttonText: "Start Pro Trial",
+      popular: true,
+      color: "border-blue-500 bg-gradient-to-br from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20"
+    }
+  ];
+
   return (
-    <div className="min-h-screen bg-gray-900 text-white overflow-hidden">
+    <div className="min-h-screen bg-gray-900 text-white overflow-hidden relative">
       {/* Animated Background */}
       <div className="fixed inset-0 z-0">
         <div className="absolute inset-0 bg-gradient-to-br from-gray-900 via-blue-900/20 to-purple-900/20"></div>
         <div className="absolute top-0 left-1/4 w-48 h-48 sm:w-96 sm:h-96 bg-blue-500/10 rounded-full blur-3xl animate-pulse"></div>
         <div className="absolute bottom-0 right-1/4 w-48 h-48 sm:w-96 sm:h-96 bg-purple-500/10 rounded-full blur-3xl animate-pulse delay-1000"></div>
         <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-48 h-48 sm:w-96 sm:h-96 bg-cyan-500/5 rounded-full blur-3xl animate-pulse delay-2000"></div>
+      </div>
+
+      {/* Bolt Badge - Fixed positioning */}
+      <div className="fixed bottom-4 right-4 z-50">
+        <a 
+          href="https://bolt.new" 
+          target="_blank" 
+          rel="noopener noreferrer"
+          className="block transition-transform hover:scale-105"
+        >
+          <img 
+            src="/logotext_poweredby_360w copy.png" 
+            alt="Powered by Bolt" 
+            className="h-8 sm:h-10 md:h-12 w-auto opacity-80 hover:opacity-100 transition-opacity"
+          />
+        </a>
       </div>
 
       {/* Navigation */}
@@ -332,6 +397,126 @@ const Home: React.FC = () => {
                 <p className="text-sm sm:text-base text-gray-400 leading-relaxed">{feature.description}</p>
               </div>
             ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Pricing Section */}
+      <section className="relative z-10 px-4 sm:px-6 py-16 sm:py-20">
+        <div className="max-w-7xl mx-auto">
+          <div className="text-center mb-12 sm:mb-16">
+            <h2 className="text-3xl sm:text-4xl lg:text-5xl font-bold mb-4 sm:mb-6">
+              <span className="text-white">Simple, </span>
+              <span className="bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">Transparent Pricing</span>
+            </h2>
+            <p className="text-lg sm:text-xl text-gray-400 max-w-3xl mx-auto px-4">
+              Choose the plan that fits your content creation needs. Start free, upgrade when you're ready.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 sm:gap-8 max-w-4xl mx-auto">
+            {pricingPlans.map((plan, index) => (
+              <div
+                key={index}
+                className={`relative rounded-2xl border-2 p-6 sm:p-8 ${plan.color} ${
+                  plan.popular ? 'transform scale-105' : ''
+                }`}
+              >
+                {plan.popular && (
+                  <div className="absolute -top-3 left-1/2 transform -translate-x-1/2">
+                    <span className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-4 py-1 rounded-full text-sm font-medium flex items-center">
+                      <Star className="h-4 w-4 mr-1" />
+                      Most Popular
+                    </span>
+                  </div>
+                )}
+
+                <div className="text-center mb-6">
+                  <div className="flex items-center justify-center mb-2">
+                    {plan.name === 'Pro' && <Crown className="h-6 w-6 text-yellow-500 mr-2" />}
+                    <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+                      {plan.name}
+                    </h3>
+                  </div>
+                  <div className="flex items-baseline justify-center">
+                    <span className="text-4xl font-bold text-gray-900 dark:text-white">
+                      {plan.price}
+                    </span>
+                    <span className="text-gray-600 dark:text-gray-400 ml-2">
+                      {plan.period}
+                    </span>
+                  </div>
+                  <p className="text-gray-600 dark:text-gray-400 mt-2">
+                    {plan.description}
+                  </p>
+                </div>
+
+                <div className="space-y-4 mb-6">
+                  <div>
+                    <h4 className="font-semibold text-gray-900 dark:text-white mb-3">
+                      What's included:
+                    </h4>
+                    <ul className="space-y-2">
+                      {plan.features.map((feature, featureIndex) => (
+                        <li key={featureIndex} className="flex items-center">
+                          <Check className="h-4 w-4 text-green-500 mr-3 flex-shrink-0" />
+                          <span className="text-sm text-gray-700 dark:text-gray-300">
+                            {feature}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  {plan.limitations.length > 0 && (
+                    <div>
+                      <h4 className="font-semibold text-gray-900 dark:text-white mb-3">
+                        Limitations:
+                      </h4>
+                      <ul className="space-y-2">
+                        {plan.limitations.map((limitation, limitIndex) => (
+                          <li key={limitIndex} className="flex items-center">
+                            <X className="h-4 w-4 text-red-500 mr-3 flex-shrink-0" />
+                            <span className="text-sm text-gray-500 dark:text-gray-400">
+                              {limitation}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+
+                <button
+                  onClick={handleGetStarted}
+                  className={`w-full py-3 px-4 rounded-lg font-semibold transition-all ${
+                    plan.popular
+                      ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white hover:from-blue-700 hover:to-purple-700'
+                      : 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white hover:bg-gray-200 dark:hover:bg-gray-600'
+                  }`}
+                >
+                  {plan.buttonText}
+                </button>
+              </div>
+            ))}
+          </div>
+
+          {/* Trust indicators */}
+          <div className="mt-8 pt-6 border-t border-gray-700">
+            <div className="flex flex-col sm:flex-row items-center justify-center space-y-4 sm:space-y-0 sm:space-x-8 text-sm text-gray-400">
+              <div className="flex items-center">
+                <CheckCircle className="h-4 w-4 mr-2 text-green-500" />
+                14-day free trial
+              </div>
+              <div className="flex items-center">
+                <CheckCircle className="h-4 w-4 mr-2 text-green-500" />
+                Cancel anytime
+              </div>
+              <div className="flex items-center">
+                <CheckCircle className="h-4 w-4 mr-2 text-green-500" />
+                Secure payment with Stripe
+              </div>
+            </div>
           </div>
         </div>
       </section>
