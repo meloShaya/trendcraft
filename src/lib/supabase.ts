@@ -30,10 +30,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 		autoRefreshToken: true,
 		persistSession: true,
 		detectSessionInUrl: true,
-		flowType: 'pkce',
-		storage: window.localStorage, // Explicitly use localStorage for session persistence
-		storageKey: 'trendcraft-auth-token', // Custom storage key
-		debug: false // Set to true for debugging auth issues
+		flowType: 'pkce'
 	},
 	global: {
 		headers: {
