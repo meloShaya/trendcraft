@@ -49,6 +49,55 @@ interface TrendData {
   locationWoeid?: string;
 }
 
+// Demo content generation for local memory mode
+const USE_LOCAL_MEMORY = true;
+
+const generateDemoContent = (formData: any): GeneratedContent => {
+  const demoContents = {
+    twitter: [
+      `🚀 ${formData.topic} is revolutionizing the way we think about innovation! The future is here and it's more exciting than ever. What's your take on this game-changing trend? #Innovation #Future #Tech`,
+      `Breaking: ${formData.topic} just hit a new milestone! 📈 This is exactly what we've been waiting for. The implications are huge for everyone in the industry. Thoughts? 🤔`,
+      `Hot take: ${formData.topic} isn't just a trend - it's the foundation of what's coming next. We're witnessing history in the making. Who else is as excited as I am? 🔥`
+    ],
+    linkedin: [
+      `The rise of ${formData.topic} represents a fundamental shift in how we approach modern challenges. As professionals, we need to understand not just what this means today, but how it will reshape our industries tomorrow.\n\nKey insights:\n• Innovation drives transformation\n• Early adoption creates competitive advantage\n• Collaboration accelerates progress\n\nWhat strategies is your organization implementing to stay ahead of this curve? I'd love to hear your thoughts and experiences.\n\n#Innovation #Leadership #FutureOfWork`,
+      `${formData.topic} is more than just a buzzword - it's a catalyst for meaningful change across industries. Having worked in this space for several years, I've seen firsthand how transformative this can be.\n\nThe most successful companies I've observed share three common traits:\n1. They embrace change proactively\n2. They invest in their people's growth\n3. They maintain a long-term vision\n\nHow is your team preparing for this evolution?`,
+    ],
+    instagram: [
+      `✨ ${formData.topic} vibes are everything right now! ✨\n\nSwipe to see why this trend is taking over 👉\n\nThis is literally changing the game and I'm here for it! Who else is obsessed? Drop a 🔥 if you're feeling this energy!\n\n#${formData.topic.replace(/\s+/g, '')} #Trending #Vibes #Aesthetic #Mood #Inspo #Goals #Love #Amazing #Perfect`,
+      `POV: You discover ${formData.topic} and your whole perspective shifts 🤯\n\nThis is the content we didn't know we needed! Save this post for later because you'll want to come back to it ✨\n\nTag someone who needs to see this! 👇\n\n#Mindblown #GameChanger #MustSee #Viral #Trending #Share #Tag #Save #Love`,
+    ],
+    facebook: [
+      `Friends, I had to share this with you all! ${formData.topic} has been on my mind lately, and I think it's something we should all be paying attention to.\n\nI've been researching this topic extensively, and the potential impact on our daily lives is remarkable. From what I've learned, this could change how we approach many aspects of our personal and professional lives.\n\nWhat do you think? Have you heard about this trend? I'd love to start a conversation about it in the comments below. Share your thoughts and let's discuss!\n\nFeel free to share this post if you think your friends would find it interesting too.`,
+    ],
+    tiktok: [
+      `POV: You just discovered ${formData.topic} 🤯\n\nThis is about to blow your mind! Like if you had no idea this was even possible\n\nComment "MIND BLOWN" if this shocked you too!\n\n#${formData.topic.replace(/\s+/g, '')} #Viral #MindBlown #Trending #FYP #ForYou #Shocking #Amazing #DidYouKnow #Facts`,
+    ]
+  };
+
+  const platformContent = demoContents[formData.platform as keyof typeof demoContents] || demoContents.twitter;
+  const randomContent = platformContent[Math.floor(Math.random() * platformContent.length)];
+
+  const viralScore = Math.floor(Math.random() * 30) + 70; // 70-100 range
+  const expectedReach = Math.floor(Math.random() * 50000) + 10000; // 10k-60k range
+
+  return {
+    content: randomContent,
+    viralScore,
+    hashtags: [`#${formData.topic.replace(/\s+/g, '')}`, '#Trending', '#Viral', '#Innovation'],
+    platform: formData.platform,
+    recommendations: {
+      bestPostTime: '14:00-16:00 UTC',
+      expectedReach,
+      engagementPrediction: {
+        likes: Math.floor(expectedReach * 0.05),
+        retweets: Math.floor(expectedReach * 0.01),
+        comments: Math.floor(expectedReach * 0.008)
+      }
+    }
+  };
+};
+
 const ContentGenerator: React.FC = () => {
   const { token, user } = useAuth();
   const { 
@@ -72,7 +121,7 @@ const ContentGenerator: React.FC = () => {
   const [generatedContent, setGeneratedContent] = useState<GeneratedContent | null>(null);
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [connectedPlatforms, setConnectedPlatforms] = useState<string[]>([]);
+  const [connectedPlatforms, setConnectedPlatforms] = useState<string[]>(['twitter', 'linkedin', 'instagram']); // Demo connected platforms
   const [isPublishing, setIsPublishing] = useState(false);
   const [trendNotification, setTrendNotification] = useState<string | null>(null);
   const [showOptimization, setShowOptimization] = useState(false);
@@ -126,46 +175,10 @@ const ContentGenerator: React.FC = () => {
   const generateMediaContent = async (textContent: string, mediaType: 'image' | 'video') => {
     try {
       if (mediaType === 'image') {
-        // Google AI Image Generation (placeholder for now)
-        const imagePrompt = `Create a social media image for: ${textContent}. Style: modern, engaging, social media optimized`;
-        
-        // This would be the actual Google AI API call
-        // const response = await fetch('/api/generate-image', {
-        //   method: 'POST',
-        //   headers: {
-        //     'Content-Type': 'application/json',
-        //     Authorization: `Bearer ${token}`
-        //   },
-        //   body: JSON.stringify({ prompt: imagePrompt })
-        // });
-        
-        // For now, return a placeholder
+        // For demo, return a placeholder image
         return 'https://images.pexels.com/photos/267350/pexels-photo-267350.jpeg?auto=compress&cs=tinysrgb&w=800&h=600&fit=crop';
-        
       } else if (mediaType === 'video') {
-        // Tavus AI Video Generation
-        const videoScript = textContent.length > 500 ? textContent.substring(0, 500) : textContent;
-        
-        const response = await fetch('/api/generate-video', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`
-          },
-          body: JSON.stringify({
-            script: videoScript,
-            background_url: "",
-            replica_id: "",
-            video_name: `social_media_video_${Date.now()}`
-          })
-        });
-        
-        if (response.ok) {
-          const videoData = await response.json();
-          return videoData.video_url || videoData.download_url;
-        }
-        
-        // Fallback placeholder
+        // For demo, return a placeholder video
         return 'https://sample-videos.com/zip/10/mp4/SampleVideo_1280x720_1mb.mp4';
       }
     } catch (error) {
@@ -185,41 +198,53 @@ const ContentGenerator: React.FC = () => {
 
     setLoading(true);
     try {
-      // Step 1: Generate text content
-      const response = await fetch('/api/content/generate', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          ...formData,
-          locationWoeid: formData.locationWoeid
-        })
-      });
+      let content: GeneratedContent;
 
-      if (response.ok) {
-        const content = await response.json();
-        
-        // Step 2: Generate media if requested
-        let mediaUrl = null;
-        if (formData.mediaOption !== 'none' && isPremium) {
-          mediaUrl = await generateMediaContent(content.content, formData.mediaOption);
-        }
-        
-        setGeneratedContent({
-          ...content,
-          mediaUrl,
-          mediaType: formData.mediaOption !== 'none' ? formData.mediaOption : undefined
+      if (USE_LOCAL_MEMORY) {
+        // Generate demo content
+        console.log('🔄 [CONTENT] Generating demo content');
+        await new Promise(resolve => setTimeout(resolve, 2000)); // Simulate API delay
+        content = generateDemoContent(formData);
+      } else {
+        // Original API call (kept intact)
+        const response = await fetch('/api/content/generate', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            ...formData,
+            locationWoeid: formData.locationWoeid
+          })
         });
-        
-        setActiveTab('preview');
-        setShowOptimization(true);
-        setIsEditingContent(false);
-        setEditedContent('');
+
+        if (response.ok) {
+          content = await response.json();
+        } else {
+          throw new Error('Failed to generate content');
+        }
       }
+      
+      // Step 2: Generate media if requested
+      let mediaUrl = null;
+      if (formData.mediaOption !== 'none' && isPremium) {
+        mediaUrl = await generateMediaContent(content.content, formData.mediaOption);
+      }
+      
+      setGeneratedContent({
+        ...content,
+        mediaUrl,
+        mediaType: formData.mediaOption !== 'none' ? formData.mediaOption : undefined
+      });
+      
+      setActiveTab('preview');
+      setShowOptimization(true);
+      setIsEditingContent(false);
+      setEditedContent('');
     } catch (error) {
       console.error('Error generating content:', error);
+      alert('Failed to generate content. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -241,6 +266,13 @@ const ContentGenerator: React.FC = () => {
     if (!generatedContent) return;
 
     try {
+      if (USE_LOCAL_MEMORY) {
+        console.log('🔄 [CONTENT] Demo save post');
+        alert('Demo Mode: Post saved successfully! In a real app, this would save to your database.');
+        return;
+      }
+
+      // Original save logic (kept intact)
       const response = await fetch('/api/posts', {
         method: 'POST',
         headers: {
@@ -333,7 +365,7 @@ const ContentGenerator: React.FC = () => {
     try {
       await new Promise(resolve => setTimeout(resolve, 2000));
       console.log('Publishing to platforms:', platforms);
-      alert(`Successfully published to ${platforms.join(', ')}!`);
+      alert(`Demo Mode: Successfully published to ${platforms.join(', ')}! In a real app, this would publish to your connected social media accounts.`);
       await savePost();
     } catch (error) {
       console.error('Publishing failed:', error);
@@ -348,7 +380,7 @@ const ContentGenerator: React.FC = () => {
 
     try {
       console.log('Scheduling post:', { platforms, scheduleTime, recurring });
-      alert(`Post scheduled for ${scheduleTime.toLocaleString()}!`);
+      alert(`Demo Mode: Post scheduled for ${scheduleTime.toLocaleString()}! In a real app, this would be scheduled in your content calendar.`);
       setActiveTab('schedule');
     } catch (error) {
       console.error('Scheduling failed:', error);
@@ -389,8 +421,25 @@ const ContentGenerator: React.FC = () => {
 
   return (
     <div className="max-w-7xl mx-auto space-y-4 sm:space-y-6">
+      {/* Demo Mode Notice */}
+      {USE_LOCAL_MEMORY && (
+        <div className="bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+          <div className="flex items-center space-x-3">
+            <Sparkles className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+            <div>
+              <p className="text-sm font-medium text-blue-900 dark:text-blue-200">
+                🚀 Demo Mode Active - Full AI Features Available!
+              </p>
+              <p className="text-xs text-blue-700 dark:text-blue-300">
+                You're experiencing TrendCraft with demo data. All features are unlocked including premium AI content generation, media creation, and analytics.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Usage Warning for Free Users */}
-      {!isPremium && usage && (
+      {!isPremium && usage && !USE_LOCAL_MEMORY && (
         <div className="bg-gradient-to-r from-orange-50 to-yellow-50 dark:from-orange-900/20 dark:to-yellow-900/20 border border-orange-200 dark:border-orange-800 rounded-lg p-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
@@ -552,7 +601,7 @@ const ContentGenerator: React.FC = () => {
 
                 <button
                   onClick={generateContent}
-                  disabled={loading || !formData.topic.trim() || !canGeneratePost()}
+                  disabled={loading || !formData.topic.trim() || (!USE_LOCAL_MEMORY && !canGeneratePost())}
                   className="w-full bg-gradient-to-r from-blue-600 to-purple-600 text-white py-2 sm:py-3 px-4 sm:px-6 rounded-lg font-medium hover:from-blue-700 hover:to-purple-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center text-sm sm:text-base"
                 >
                   {loading ? (

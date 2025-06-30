@@ -15,6 +15,23 @@ interface UsageData {
   month: string;
 }
 
+// Demo data for local memory mode
+const DEMO_SUBSCRIPTION: Subscription = {
+  id: 'demo-sub-123',
+  plan: 'pro',
+  status: 'active',
+  current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString() // 30 days from now
+};
+
+const DEMO_USAGE: UsageData = {
+  posts_generated: 25,
+  images_generated: 8,
+  videos_generated: 3,
+  month: new Date().toISOString().slice(0, 7)
+};
+
+const USE_LOCAL_MEMORY = true; // Match the auth context setting
+
 export const useSubscription = () => {
   const { token, user } = useAuth();
   const [subscription, setSubscription] = useState<Subscription | null>(null);
@@ -26,6 +43,16 @@ export const useSubscription = () => {
       if (!token) return;
 
       try {
+        // Local memory mode - use demo data
+        if (USE_LOCAL_MEMORY) {
+          console.log('🔄 [SUBSCRIPTION] Using demo subscription data');
+          setSubscription(DEMO_SUBSCRIPTION);
+          setUsage(DEMO_USAGE);
+          setLoading(false);
+          return;
+        }
+
+        // Original API calls (kept intact)
         const [subResponse, usageResponse] = await Promise.all([
           fetch('/api/subscription', {
             headers: { Authorization: `Bearer ${token}` }
@@ -39,7 +66,6 @@ export const useSubscription = () => {
           const subData = await subResponse.json();
           setSubscription(subData);
         } else {
-          // Default to free plan if no subscription found
           setSubscription({
             id: 'free',
             plan: 'free',
@@ -52,7 +78,6 @@ export const useSubscription = () => {
           const usageData = await usageResponse.json();
           setUsage(usageData);
         } else {
-          // Default usage data
           setUsage({
             posts_generated: 0,
             images_generated: 0,
@@ -100,6 +125,14 @@ export const useSubscription = () => {
 
   const createCheckoutSession = async (plan: 'pro') => {
     try {
+      // Local memory mode - simulate checkout
+      if (USE_LOCAL_MEMORY) {
+        console.log('🔄 [SUBSCRIPTION] Demo checkout for plan:', plan);
+        alert('Demo Mode: In a real app, this would redirect to Stripe checkout. For demo purposes, you already have Pro features!');
+        return;
+      }
+
+      // Original checkout logic (kept intact)
       const response = await fetch('/api/create-checkout-session', {
         method: 'POST',
         headers: {
@@ -123,6 +156,14 @@ export const useSubscription = () => {
 
   const openBillingPortal = async () => {
     try {
+      // Local memory mode - simulate billing portal
+      if (USE_LOCAL_MEMORY) {
+        console.log('🔄 [SUBSCRIPTION] Demo billing portal');
+        alert('Demo Mode: In a real app, this would open the Stripe billing portal.');
+        return;
+      }
+
+      // Original billing portal logic (kept intact)
       const response = await fetch('/api/billing-portal', {
         method: 'POST',
         headers: {

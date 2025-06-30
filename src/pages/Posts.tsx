@@ -26,6 +26,70 @@ interface Post {
   };
 }
 
+// Demo posts data for local memory mode
+const DEMO_POSTS: Post[] = [
+  {
+    id: 1,
+    content: "🚀 Just discovered the future of content creation with AI! The possibilities are endless when you combine creativity with technology. What's your experience with AI tools? #AI #ContentCreation #Innovation #TechTrends",
+    platform: "twitter",
+    viralScore: 94,
+    engagement: { likes: 1247, retweets: 89, comments: 156, shares: 89 },
+    hashtags: ["#AI", "#ContentCreation", "#Innovation", "#TechTrends"],
+    status: "published",
+    scheduledFor: "",
+    createdAt: "2024-01-15T10:30:00Z",
+    performance: { impressions: 25600, reach: 18900, clickThrough: 3.2 }
+  },
+  {
+    id: 2,
+    content: "The rise of sustainable technology represents a fundamental shift in how we approach modern challenges. As professionals, we need to understand not just what this means today, but how it will reshape our industries tomorrow.\n\nKey insights:\n• Innovation drives transformation\n• Early adoption creates competitive advantage\n• Collaboration accelerates progress\n\nWhat strategies is your organization implementing to stay ahead of this curve? I'd love to hear your thoughts and experiences.\n\n#GreenTech #Sustainability #Leadership #FutureOfWork",
+    platform: "linkedin",
+    viralScore: 87,
+    engagement: { likes: 892, retweets: 0, comments: 67, shares: 234 },
+    hashtags: ["#GreenTech", "#Sustainability", "#Leadership", "#FutureOfWork"],
+    status: "published",
+    scheduledFor: "",
+    createdAt: "2024-01-14T14:20:00Z",
+    performance: { impressions: 18400, reach: 12300, clickThrough: 4.1 }
+  },
+  {
+    id: 3,
+    content: "✨ Remote work vibes are everything right now! ✨\n\nSwipe to see why this trend is taking over 👉\n\nThis is literally changing the game and I'm here for it! Who else is obsessed? Drop a 🔥 if you're feeling this energy!\n\n#RemoteWork #WorkFromHome #DigitalNomad #Lifestyle #Goals #Love #Amazing #Perfect",
+    platform: "instagram",
+    viralScore: 82,
+    engagement: { likes: 2156, retweets: 0, comments: 89, shares: 156 },
+    hashtags: ["#RemoteWork", "#WorkFromHome", "#DigitalNomad", "#Lifestyle"],
+    status: "published",
+    scheduledFor: "",
+    createdAt: "2024-01-13T16:45:00Z",
+    performance: { impressions: 34200, reach: 28900, clickThrough: 2.8 }
+  },
+  {
+    id: 4,
+    content: "Breaking: Mental Health Awareness just hit a new milestone! 📈 This is exactly what we've been waiting for. The implications are huge for everyone in the wellness industry. Thoughts? 🤔 #MentalHealth #Wellness #SelfCare #Mindfulness",
+    platform: "twitter",
+    viralScore: 91,
+    engagement: { likes: 0, retweets: 0, comments: 0, shares: 0 },
+    hashtags: ["#MentalHealth", "#Wellness", "#SelfCare", "#Mindfulness"],
+    status: "scheduled",
+    scheduledFor: "2024-01-20T19:30:00Z",
+    createdAt: "2024-01-15T12:00:00Z"
+  },
+  {
+    id: 5,
+    content: "Hot take: Cryptocurrency isn't just a trend - it's the foundation of what's coming next. We're witnessing history in the making. Who else is as excited as I am? 🔥 #Crypto #Bitcoin #Blockchain #DeFi #Innovation",
+    platform: "twitter",
+    viralScore: 76,
+    engagement: { likes: 0, retweets: 0, comments: 0, shares: 0 },
+    hashtags: ["#Crypto", "#Bitcoin", "#Blockchain", "#DeFi"],
+    status: "draft",
+    scheduledFor: "",
+    createdAt: "2024-01-15T15:30:00Z"
+  }
+];
+
+const USE_LOCAL_MEMORY = true;
+
 const Posts: React.FC = () => {
   const { token, logout } = useAuth();
   const navigate = useNavigate();
@@ -36,6 +100,16 @@ const Posts: React.FC = () => {
   useEffect(() => {
     const fetchPosts = async () => {
       try {
+        if (USE_LOCAL_MEMORY) {
+          console.log('🔄 [POSTS] Using demo posts data');
+          // Simulate API delay
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          setPosts(DEMO_POSTS);
+          setLoading(false);
+          return;
+        }
+
+        // Original API call (kept intact)
         const response = await fetch('/api/posts', {
           headers: { Authorization: `Bearer ${token}` }
         });
@@ -46,11 +120,9 @@ const Posts: React.FC = () => {
         }
         
         const data = await response.json();
-        // Ensure posts is always an array
         setPosts(Array.isArray(data) ? data : []);
       } catch (error) {
         console.error('Error fetching posts:', error);
-        // Set empty array on error to prevent filter issues
         setPosts([]);
       } finally {
         setLoading(false);
@@ -66,6 +138,13 @@ const Posts: React.FC = () => {
     if (!confirm('Are you sure you want to delete this post?')) return;
 
     try {
+      if (USE_LOCAL_MEMORY) {
+        console.log('🔄 [POSTS] Demo delete post:', postId);
+        setPosts(posts.filter(post => post.id !== postId));
+        return;
+      }
+
+      // Original API call (kept intact)
       const response = await fetch(`/api/posts/${postId}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` }
@@ -117,6 +196,23 @@ const Posts: React.FC = () => {
 
   return (
     <div className="space-y-4 sm:space-y-6">
+      {/* Demo Mode Notice */}
+      {USE_LOCAL_MEMORY && (
+        <div className="bg-gradient-to-r from-indigo-50 to-cyan-50 dark:from-indigo-900/20 dark:to-cyan-900/20 border border-indigo-200 dark:border-indigo-800 rounded-lg p-4">
+          <div className="flex items-center space-x-3">
+            <FileText className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
+            <div>
+              <p className="text-sm font-medium text-indigo-900 dark:text-indigo-200">
+                📝 Demo Content Library - Your Posts & Performance!
+              </p>
+              <p className="text-xs text-indigo-700 dark:text-indigo-300">
+                View your content portfolio with detailed performance metrics, engagement analytics, and scheduling management.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -139,6 +235,9 @@ const Posts: React.FC = () => {
               }`}
             >
               {status === 'all' ? 'All Posts' : status.charAt(0).toUpperCase() + status.slice(1)}
+              <span className="ml-2 text-xs">
+                ({status === 'all' ? posts.length : posts.filter(p => p.status === status).length})
+              </span>
             </button>
           ))}
         </div>
@@ -183,7 +282,7 @@ const Posts: React.FC = () => {
             {/* Content */}
             <div className="mb-4">
               <p className="text-gray-900 dark:text-white leading-relaxed text-sm sm:text-base">
-                {post.content}
+                {post.content.length > 200 ? `${post.content.substring(0, 200)}...` : post.content}
               </p>
             </div>
 
@@ -225,7 +324,7 @@ const Posts: React.FC = () => {
                 <div className="text-center">
                   <div className="flex items-center justify-center text-green-500 mb-1">
                     <Share className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
-                    <span className="font-medium text-xs sm:text-sm">{post.engagement.retweets}</span>
+                    <span className="font-medium text-xs sm:text-sm">{post.engagement.retweets || post.engagement.shares}</span>
                   </div>
                   <p className="text-xs text-gray-600 dark:text-gray-400">Shares</p>
                 </div>
@@ -241,7 +340,7 @@ const Posts: React.FC = () => {
             )}
 
             {/* Scheduled Info */}
-            {post.status === 'scheduled' && (
+            {post.status === 'scheduled' && post.scheduledFor && (
               <div className="flex items-center text-blue-600 dark:text-blue-400 pt-4 border-t border-gray-200 dark:border-gray-700">
                 <Calendar className="h-3 w-3 sm:h-4 sm:w-4 mr-2 flex-shrink-0" />
                 <span className="text-xs sm:text-sm">

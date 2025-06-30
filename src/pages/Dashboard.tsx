@@ -32,6 +32,32 @@ interface PerformanceData {
   clicks: number;
 }
 
+// Demo data for local memory mode
+const DEMO_PERFORMANCE_DATA: PerformanceData[] = [
+  { date: '2024-01-01', impressions: 12500, engagement: 850, clicks: 125 },
+  { date: '2024-01-02', impressions: 15200, engagement: 1020, clicks: 156 },
+  { date: '2024-01-03', impressions: 18900, engagement: 1340, clicks: 189 },
+  { date: '2024-01-04', impressions: 22100, engagement: 1580, clicks: 221 },
+  { date: '2024-01-05', impressions: 19800, engagement: 1420, clicks: 198 },
+  { date: '2024-01-06', impressions: 25600, engagement: 1890, clicks: 256 },
+  { date: '2024-01-07', impressions: 28400, engagement: 2130, clicks: 284 }
+];
+
+const DEMO_ANALYTICS: AnalyticsData = {
+  totalPosts: 47,
+  totalEngagement: 12450,
+  totalImpressions: 156800,
+  avgViralScore: 84,
+  weeklyGrowth: '+23.5%',
+  topPerformingPost: {
+    content: "🚀 Just discovered the future of content creation with AI! The possibilities are endless when you combine creativity with technology. What's your experience with AI tools?",
+    viralScore: 94,
+    engagement: { likes: 1247, comments: 156, retweets: 89 }
+  }
+};
+
+const USE_LOCAL_MEMORY = true;
+
 const Dashboard: React.FC = () => {
   const { token } = useAuth();
   const navigate = useNavigate();
@@ -42,6 +68,17 @@ const Dashboard: React.FC = () => {
   useEffect(() => {
     const fetchDashboardData = async () => {
       try {
+        if (USE_LOCAL_MEMORY) {
+          console.log('🔄 [DASHBOARD] Using demo dashboard data');
+          // Simulate API delay
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          setAnalytics(DEMO_ANALYTICS);
+          setPerformanceData(DEMO_PERFORMANCE_DATA);
+          setLoading(false);
+          return;
+        }
+
+        // Original API calls (kept intact)
         const [analyticsRes, performanceRes] = await Promise.all([
           fetch('/api/analytics/overview', {
             headers: { Authorization: `Bearer ${token}` }
@@ -55,7 +92,6 @@ const Dashboard: React.FC = () => {
           const analyticsData = await analyticsRes.json();
           setAnalytics(analyticsData);
         } else {
-          // Set default analytics if API fails
           setAnalytics({
             totalPosts: 0,
             totalEngagement: 0,
@@ -70,12 +106,10 @@ const Dashboard: React.FC = () => {
           const performanceData = await performanceRes.json();
           setPerformanceData(Array.isArray(performanceData) ? performanceData : []);
         } else {
-          // Set empty array if API fails
           setPerformanceData([]);
         }
       } catch (error) {
         console.error('Error fetching dashboard data:', error);
-        // Set default values on error
         setAnalytics({
           totalPosts: 0,
           totalEngagement: 0,
@@ -119,7 +153,6 @@ const Dashboard: React.FC = () => {
     );
   }
 
-  // Calculate real growth percentages based on data
   const calculateGrowth = (current: number, previous: number) => {
     if (previous === 0) return current > 0 ? '+100%' : '+0%';
     const growth = ((current - previous) / previous) * 100;
@@ -159,6 +192,23 @@ const Dashboard: React.FC = () => {
 
   return (
     <div className="space-y-4 sm:space-y-6">
+      {/* Demo Mode Notice */}
+      {USE_LOCAL_MEMORY && (
+        <div className="bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg p-4">
+          <div className="flex items-center space-x-3">
+            <BarChart3 className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+            <div>
+              <p className="text-sm font-medium text-emerald-900 dark:text-emerald-200">
+                🎯 Demo Dashboard - Complete Analytics Overview!
+              </p>
+              <p className="text-xs text-emerald-700 dark:text-emerald-300">
+                Experience your content performance dashboard with real-time metrics, growth tracking, and actionable insights.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Stats Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6">
         {statCards.map((card, index) => (

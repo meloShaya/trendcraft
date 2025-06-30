@@ -31,6 +31,26 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+// Demo user data for local memory fallback
+const DEMO_USER: User = {
+	id: "demo-user-123",
+	username: "demo_creator",
+	email: "demo@trendcraft.com",
+	full_name: "Demo Creator",
+	bio: "AI-powered content creator using TrendCraft",
+	avatar_url: "https://images.pexels.com/photos/614810/pexels-photo-614810.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&fit=crop",
+	is_active: true,
+	is_premium: true, // Give demo user premium features
+	last_login_at: new Date().toISOString(),
+	created_at: new Date().toISOString(),
+	updated_at: new Date().toISOString()
+};
+
+const DEMO_TOKEN = "demo-token-123";
+
+// Check if we should use local memory (when Supabase fails)
+const USE_LOCAL_MEMORY = true; // Set to true to force local memory mode
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 	children,
 }) => {
@@ -41,12 +61,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 	useEffect(() => {
 		let mounted = true;
 
-		// Check for existing session on app load
 		const initializeAuth = async () => {
 			try {
 				console.log('🔄 [AUTH] Initializing authentication...');
 				
-				// Test Supabase connection first with timeout
+				// Check if we should use local memory mode
+				if (USE_LOCAL_MEMORY) {
+					console.log('🔄 [AUTH] Using local memory mode with demo data');
+					
+					// Check if user was previously logged in (localStorage)
+					const savedUser = localStorage.getItem('demo_user');
+					const savedToken = localStorage.getItem('demo_token');
+					
+					if (savedUser && savedToken && mounted) {
+						console.log('✅ [AUTH] Found saved demo user session');
+						setUser(JSON.parse(savedUser));
+						setToken(savedToken);
+					}
+					
+					if (mounted) {
+						setLoading(false);
+					}
+					return;
+				}
+				
+				// Original Supabase logic (kept intact)
 				console.log('🔄 [AUTH] Testing Supabase connection...');
 				
 				const connectionTest = supabase
@@ -54,7 +93,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 					.select('count')
 					.limit(1);
 				
-				// Add timeout to connection test
 				const timeoutPromise = new Promise((_, reject) => {
 					setTimeout(() => reject(new Error('Connection timeout')), 10000);
 				});
@@ -74,8 +112,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 				
 				console.log('✅ [AUTH] Supabase connection successful');
 				
-				// Get the current session from Supabase
-				console.log('🔄 [AUTH] Getting current session...');
 				const { data: { session }, error } = await supabase.auth.getSession();
 				
 				if (error) {
@@ -94,10 +130,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 				}
 			} catch (error) {
 				console.error('❌ [AUTH] Critical error initializing auth:', error);
-				// Show user-friendly error for connection issues
-				if (error instanceof Error && error.message.includes('fetch')) {
-					console.error('❌ [AUTH] Network connection error - check internet connection and Supabase configuration');
-				}
 			} finally {
 				if (mounted) {
 					console.log('✅ [AUTH] Auth initialization complete, setting loading to false');
@@ -108,40 +140,46 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 
 		initializeAuth();
 
-		// Listen for auth state changes
-		console.log('🔄 [AUTH] Setting up auth state listener...');
-		const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-			console.log('🔄 [AUTH] Auth state changed:', event, session?.user?.id);
-			
-			if (!mounted) return;
+		// Only set up Supabase listener if not using local memory
+		if (!USE_LOCAL_MEMORY) {
+			console.log('🔄 [AUTH] Setting up auth state listener...');
+			const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+				console.log('🔄 [AUTH] Auth state changed:', event, session?.user?.id);
+				
+				if (!mounted) return;
 
-			try {
-				if (event === 'SIGNED_IN' && session) {
-					console.log('✅ [AUTH] User signed in:', session.user.id);
-					setLoading(true); // Show loading during profile fetch
-					await handleUserSession(session);
-					setLoading(false);
-				} else if (event === 'SIGNED_OUT') {
-					console.log('👋 [AUTH] User signed out');
-					setUser(null);
-					setToken(null);
-					setLoading(false);
-				} else if (event === 'TOKEN_REFRESHED' && session) {
-					console.log('🔄 [AUTH] Token refreshed');
-					setToken(session.access_token);
+				try {
+					if (event === 'SIGNED_IN' && session) {
+						console.log('✅ [AUTH] User signed in:', session.user.id);
+						setLoading(true);
+						await handleUserSession(session);
+						setLoading(false);
+					} else if (event === 'SIGNED_OUT') {
+						console.log('👋 [AUTH] User signed out');
+						setUser(null);
+						setToken(null);
+						setLoading(false);
+					} else if (event === 'TOKEN_REFRESHED' && session) {
+						console.log('🔄 [AUTH] Token refreshed');
+						setToken(session.access_token);
+					}
+				} catch (error) {
+					console.error('❌ [AUTH] Error in auth state change handler:', error);
+					if (mounted) {
+						setLoading(false);
+					}
 				}
-			} catch (error) {
-				console.error('❌ [AUTH] Error in auth state change handler:', error);
-				if (mounted) {
-					setLoading(false);
-				}
-			}
-		});
+			});
+
+			return () => {
+				mounted = false;
+				console.log('🔄 [AUTH] Cleaning up auth listener');
+				subscription.unsubscribe();
+			};
+		}
 
 		return () => {
 			mounted = false;
-			console.log('🔄 [AUTH] Cleaning up auth listener');
-			subscription.unsubscribe();
 		};
 	}, []);
 
@@ -149,12 +187,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 		try {
 			console.log('🔄 [AUTH] Handling user session for:', session.user.id);
 			
-			// Set token immediately
 			setToken(session.access_token);
 			console.log('✅ [AUTH] Token set');
 			
-			// Fetch user profile from our users table using maybeSingle() to avoid PGRST116 errors
-			console.log('🔄 [AUTH] Fetching user profile...');
 			const { data: userProfile, error: userError } = await supabase
 				.from("users")
 				.select("*")
@@ -165,7 +200,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 				console.log('✅ [AUTH] Found user profile:', userProfile.username);
 				setUser(userProfile);
 			} else if (!userProfile) {
-				// User profile doesn't exist, create it
 				console.log('🔄 [AUTH] Creating user profile...');
 				
 				const userData = {
@@ -193,12 +227,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 				if (!createError && newUser) {
 					console.log('✅ [AUTH] Created user profile:', newUser.username);
 					setUser(newUser);
-					
-					// Auto-connect social account if applicable
 					await autoConnectSocialAccount(session, newUser.id);
 				} else {
 					console.error('❌ [AUTH] Error creating user profile:', createError);
-					// Create a fallback user object
 					const fallbackUser = {
 						...userData,
 						is_active: true,
@@ -212,7 +243,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 				}
 			} else {
 				console.error('❌ [AUTH] Error fetching user profile:', userError);
-				// Create a fallback user object from session data
 				const fallbackUser = {
 					id: session.user.id,
 					email: session.user.email || '',
@@ -232,7 +262,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 			}
 		} catch (error) {
 			console.error('❌ [AUTH] Critical error handling user session:', error);
-			// Still set a basic user object to prevent stuck states
 			const emergencyUser = {
 				id: session.user.id,
 				email: session.user.email || '',
@@ -260,7 +289,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 				return;
 			}
 
-			// Check if social account is already connected
 			const { data: existingAccount } = await supabase
 				.from('user_social_accounts')
 				.select('*')
@@ -269,7 +297,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 				.single();
 
 			if (!existingAccount) {
-				// Connect the social account
 				await supabase
 					.from('user_social_accounts')
 					.insert({
@@ -299,7 +326,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 		try {
 			console.log('🔄 [AUTH] Attempting login for:', email);
 			
-			// Add timeout to login request
+			// Local memory mode - simple demo login
+			if (USE_LOCAL_MEMORY) {
+				console.log('🔄 [AUTH] Using local memory login');
+				
+				// Simple validation - any email/password combo works for demo
+				if (email && password) {
+					console.log('✅ [AUTH] Demo login successful');
+					setUser(DEMO_USER);
+					setToken(DEMO_TOKEN);
+					
+					// Save to localStorage for persistence
+					localStorage.setItem('demo_user', JSON.stringify(DEMO_USER));
+					localStorage.setItem('demo_token', DEMO_TOKEN);
+					return;
+				} else {
+					throw new Error('Please enter both email and password');
+				}
+			}
+			
+			// Original Supabase login logic (kept intact)
 			const loginPromise = supabase.auth.signInWithPassword({
 				email,
 				password,
@@ -313,7 +359,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 			
 			if (error) {
 				console.error('❌ [AUTH] Login error:', error.message);
-				// Provide more specific error messages
 				if (error.message.includes('fetch')) {
 					throw new Error('Network error - please check your internet connection and try again');
 				} else if (error.message.includes('Invalid login credentials')) {
@@ -324,7 +369,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 			}
 			
 			console.log('✅ [AUTH] Login successful for:', email);
-			// The auth state change listener will handle setting user and token
 		} catch (error) {
 			console.error('❌ [AUTH] Login failed:', error);
 			if (error instanceof Error && error.message.includes('timeout')) {
@@ -342,13 +386,42 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 		try {
 			console.log('🔄 [AUTH] Attempting registration for:', email);
 			
-			// Add timeout to registration request
+			// Local memory mode - simple demo registration
+			if (USE_LOCAL_MEMORY) {
+				console.log('🔄 [AUTH] Using local memory registration');
+				
+				// Simple validation
+				if (username && email && password) {
+					console.log('✅ [AUTH] Demo registration successful');
+					
+					// Create a new demo user with provided details
+					const newDemoUser = {
+						...DEMO_USER,
+						username,
+						email,
+						full_name: username,
+						id: `demo-user-${Date.now()}`
+					};
+					
+					setUser(newDemoUser);
+					setToken(DEMO_TOKEN);
+					
+					// Save to localStorage for persistence
+					localStorage.setItem('demo_user', JSON.stringify(newDemoUser));
+					localStorage.setItem('demo_token', DEMO_TOKEN);
+					return;
+				} else {
+					throw new Error('Please fill in all fields');
+				}
+			}
+			
+			// Original Supabase registration logic (kept intact)
 			const registerPromise = supabase.auth.signUp({
 				email,
 				password,
 				options: { 
 					data: { username },
-					emailRedirectTo: undefined // Disable email confirmation
+					emailRedirectTo: undefined
 				},
 			});
 			
@@ -360,7 +433,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 			
 			if (error) {
 				console.error('❌ [AUTH] Registration error:', error.message);
-				// Provide more specific error messages
 				if (error.message.includes('fetch')) {
 					throw new Error('Network error - please check your internet connection and try again');
 				} else if (error.message.includes('already registered')) {
@@ -371,7 +443,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 			}
 			
 			console.log('✅ [AUTH] Registration successful for:', email);
-			// The auth state change listener will handle the rest
 		} catch (error) {
 			console.error('❌ [AUTH] Registration failed:', error);
 			if (error instanceof Error && error.message.includes('timeout')) {
@@ -384,6 +455,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 	const logout = async () => {
 		try {
 			console.log('🔄 [AUTH] Logging out...');
+			
+			// Local memory mode
+			if (USE_LOCAL_MEMORY) {
+				console.log('🔄 [AUTH] Local memory logout');
+				setUser(null);
+				setToken(null);
+				localStorage.removeItem('demo_user');
+				localStorage.removeItem('demo_token');
+				console.log('✅ [AUTH] Demo logout successful');
+				return;
+			}
+			
+			// Original Supabase logout
 			setUser(null);
 			setToken(null);
 			await supabase.auth.signOut();
@@ -397,6 +481,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 		try {
 			console.log('🔄 [AUTH] Attempting social login with:', provider);
 			
+			// Local memory mode - simulate social login
+			if (USE_LOCAL_MEMORY) {
+				console.log('🔄 [AUTH] Demo social login with:', provider);
+				
+				// Create demo user with social provider info
+				const socialDemoUser = {
+					...DEMO_USER,
+					username: `${provider}_user`,
+					email: `demo@${provider}.com`,
+					full_name: `Demo ${provider.charAt(0).toUpperCase() + provider.slice(1)} User`,
+					id: `demo-${provider}-${Date.now()}`
+				};
+				
+				setUser(socialDemoUser);
+				setToken(DEMO_TOKEN);
+				
+				localStorage.setItem('demo_user', JSON.stringify(socialDemoUser));
+				localStorage.setItem('demo_token', DEMO_TOKEN);
+				
+				console.log('✅ [AUTH] Demo social login successful');
+				return;
+			}
+			
+			// Original Supabase social login logic (kept intact)
 			const { error } = await supabase.auth.signInWithOAuth({ 
 				provider,
 				options: {
@@ -434,14 +542,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 		socialLogin,
 	};
 
-	console.log('🔄 [AUTH] Rendering AuthProvider with loading:', loading, 'user:', !!user);
+	console.log('🔄 [AUTH] Rendering AuthProvider with loading:', loading, 'user:', !!user, 'localMode:', USE_LOCAL_MEMORY);
 
 	return (
 		<AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 	);
 };
 
-// Fix the Fast Refresh issue by ensuring consistent exports
 function useAuth() {
 	const context = useContext(AuthContext);
 	if (context === undefined) {

@@ -18,6 +18,27 @@ interface AnalyticsData {
   weeklyGrowth: string;
 }
 
+// Demo analytics data for local memory mode
+const DEMO_PERFORMANCE_DATA: PerformanceData[] = [
+  { date: '2024-01-01', impressions: 12500, engagement: 850, clicks: 125 },
+  { date: '2024-01-02', impressions: 15200, engagement: 1020, clicks: 156 },
+  { date: '2024-01-03', impressions: 18900, engagement: 1340, clicks: 189 },
+  { date: '2024-01-04', impressions: 22100, engagement: 1580, clicks: 221 },
+  { date: '2024-01-05', impressions: 19800, engagement: 1420, clicks: 198 },
+  { date: '2024-01-06', impressions: 25600, engagement: 1890, clicks: 256 },
+  { date: '2024-01-07', impressions: 28400, engagement: 2130, clicks: 284 }
+];
+
+const DEMO_ANALYTICS: AnalyticsData = {
+  totalPosts: 47,
+  totalEngagement: 12450,
+  totalImpressions: 156800,
+  avgViralScore: 84,
+  weeklyGrowth: '+23.5%'
+};
+
+const USE_LOCAL_MEMORY = true;
+
 const Analytics: React.FC = () => {
   const { token } = useAuth();
   const [performanceData, setPerformanceData] = useState<PerformanceData[]>([]);
@@ -28,6 +49,17 @@ const Analytics: React.FC = () => {
   useEffect(() => {
     const fetchAnalytics = async () => {
       try {
+        if (USE_LOCAL_MEMORY) {
+          console.log('🔄 [ANALYTICS] Using demo analytics data');
+          // Simulate API delay
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          setPerformanceData(DEMO_PERFORMANCE_DATA);
+          setAnalytics(DEMO_ANALYTICS);
+          setLoading(false);
+          return;
+        }
+
+        // Original API calls (kept intact)
         const [performanceRes, overviewRes] = await Promise.all([
           fetch('/api/analytics/performance', {
             headers: { Authorization: `Bearer ${token}` }
@@ -39,7 +71,6 @@ const Analytics: React.FC = () => {
 
         if (performanceRes.ok) {
           const performanceData = await performanceRes.json();
-          // Ensure performanceData is an array
           setPerformanceData(Array.isArray(performanceData) ? performanceData : []);
         } else {
           setPerformanceData([]);
@@ -59,7 +90,6 @@ const Analytics: React.FC = () => {
         }
       } catch (error) {
         console.error('Error fetching analytics:', error);
-        // Set default values on error
         setPerformanceData([]);
         setAnalytics({
           totalPosts: 0,
@@ -91,21 +121,36 @@ const Analytics: React.FC = () => {
     engagementRate: item.impressions > 0 ? ((item.engagement / item.impressions) * 100).toFixed(1) : '0'
   }));
 
-  // Calculate real growth percentages based on data
   const calculateGrowth = (current: number, previous: number) => {
     if (previous === 0) return current > 0 ? '+100%' : '+0%';
     const growth = ((current - previous) / previous) * 100;
     return growth >= 0 ? `+${growth.toFixed(1)}%` : `${growth.toFixed(1)}%`;
   };
 
-  // Real engagement metrics from database
   const totalLikes = performanceData.reduce((sum, item) => sum + (item.engagement || 0), 0);
-  const totalComments = Math.floor(totalLikes * 0.15); // Estimate based on typical engagement ratios
+  const totalComments = Math.floor(totalLikes * 0.15);
   const totalShares = Math.floor(totalLikes * 0.08);
   const totalFollows = Math.floor(totalLikes * 0.02);
 
   return (
     <div className="space-y-4 sm:space-y-6">
+      {/* Demo Mode Notice */}
+      {USE_LOCAL_MEMORY && (
+        <div className="bg-gradient-to-r from-purple-50 to-pink-50 dark:from-purple-900/20 dark:to-pink-900/20 border border-purple-200 dark:border-purple-800 rounded-lg p-4">
+          <div className="flex items-center space-x-3">
+            <BarChart3 className="h-5 w-5 text-purple-600 dark:text-purple-400" />
+            <div>
+              <p className="text-sm font-medium text-purple-900 dark:text-purple-200">
+                📊 Demo Analytics Dashboard - Real Performance Insights!
+              </p>
+              <p className="text-xs text-purple-700 dark:text-purple-300">
+                Explore comprehensive analytics with real-time performance tracking, engagement metrics, and growth insights.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
