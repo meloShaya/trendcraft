@@ -2,7 +2,8 @@ import { createClient } from "@supabase/supabase-js";
 import dotenv from "dotenv";
 dotenv.config();
 
-const supabaseUrl = process.env.VITE_SUPABASE_URL; // Use the same URL as frontend
+// Use the correct environment variables
+const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 console.log('🔧 [SERVER] Supabase configuration:', {
@@ -13,21 +14,24 @@ console.log('🔧 [SERVER] Supabase configuration:', {
 
 if (!supabaseUrl || !supabaseServiceRoleKey) {
 	console.error('❌ [SERVER] Missing Supabase environment variables:', {
-		VITE_SUPABASE_URL: !!supabaseUrl,
+		SUPABASE_URL: !!process.env.SUPABASE_URL,
+		VITE_SUPABASE_URL: !!process.env.VITE_SUPABASE_URL,
 		SUPABASE_SERVICE_ROLE_KEY: !!supabaseServiceRoleKey
 	});
 	throw new Error("Missing Supabase environment variables");
 }
 
-// Validate URL format
+// Validate URL format - must be the API URL, not database URL
 try {
 	new URL(supabaseUrl);
-	if (!supabaseUrl.includes('supabase.co')) {
-		throw new Error('Invalid Supabase URL format');
+	if (!supabaseUrl.includes('supabase.co') || supabaseUrl.includes('postgresql://')) {
+		throw new Error('Invalid Supabase URL format - must be API URL (https://xxx.supabase.co), not database URL');
 	}
 } catch (error) {
 	console.error('❌ [SERVER] Invalid Supabase URL format:', supabaseUrl);
-	throw new Error("Invalid Supabase URL format");
+	console.error('Expected format: https://your-project.supabase.co');
+	console.error('Received format:', supabaseUrl);
+	throw new Error("Invalid Supabase URL format - must be API URL, not database URL");
 }
 
 export const supabase = createClient(supabaseUrl, supabaseServiceRoleKey, {
