@@ -1,8 +1,8 @@
 import express from 'express';
 import cors from 'cors';
+import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { supabase } from './supabaseClient.js';
 
 dotenv.config();
 
@@ -12,10 +12,21 @@ const PORT = process.env.PORT || 3001;
 // Initialize Gemini AI
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
+// Supabase client
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+if (!supabaseUrl || !supabaseServiceRoleKey) {
+  console.error('Missing Supabase environment variables');
+  process.exit(1);
+}
+
 if (!process.env.GEMINI_API_KEY) {
   console.error('Missing GEMINI_API_KEY environment variable');
   process.exit(1);
 }
+
+const supabase = createClient(supabaseUrl, supabaseServiceRoleKey);
 
 // Middleware
 app.use(cors());
