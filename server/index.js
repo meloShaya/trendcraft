@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import { createClient } from '@supabase/supabase-js';
+import jwt from 'jsonwebtoken';
 import dotenv from 'dotenv';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
@@ -32,7 +33,7 @@ const supabase = createClient(supabaseUrl, supabaseServiceRoleKey);
 app.use(cors());
 app.use(express.json());
 
-// Authentication middleware - Fixed to work with Supabase tokens
+// Authentication middleware
 const authenticateToken = async (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
@@ -42,19 +43,20 @@ const authenticateToken = async (req, res, next) => {
   }
 
   try {
-    // Use Supabase to verify the token instead of manual JWT verification
-    const { data: { user }, error } = await supabase.auth.getUser(token);
+    // Verify the JWT token using Supabase's JWT secret
+    const jwtSecret = process.env.SUPABASE_JWT_SECRET || process.env.JWT_SECRET;
     
-    if (error || !user) {
-      console.error('Token verification failed:', error?.message);
-      return res.status(403).json({ error: 'Invalid or expired token' });
+    if (!jwtSecret) {
+      console.error('JWT_SECRET or SUPABASE_JWT_SECRET not found');
+      return res.status(500).json({ error: 'Server configuration error' });
     }
 
-    req.user = user;
-    req.userId = user.id;
+    const decoded = jwt.verify(token, jwtSecret);
+    req.user = decoded;
+    req.userId = decoded.sub; // Supabase uses 'sub' for user ID
     next();
   } catch (error) {
-    console.error('Authentication error:', error.message);
+    console.error('Token verification failed:', error.message);
     return res.status(403).json({ error: 'Invalid or expired token' });
   }
 };
